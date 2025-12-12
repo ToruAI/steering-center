@@ -12,6 +12,7 @@ export function Layout({ children }: LayoutProps) {
 
   const navItems = [
     { path: '/', icon: Home, label: 'Dashboard' },
+    { path: '/system-monitor', icon: Activity, label: 'System Monitor' },
     { path: '/scripts', icon: Terminal, label: 'Scripts' },
     { path: '/settings', icon: Settings, label: 'Settings' },
   ];

@@ -1,6 +1,6 @@
 # Steering Center
 
-**Steering center for your digital assets.**
+**Control center for your digital assets.**
 
 ![Steering Center Dashboard](image.png)
 

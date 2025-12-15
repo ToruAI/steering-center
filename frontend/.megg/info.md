@@ -1,6 +1,6 @@
 ---
 created: 2025-12-15T09:25:00.584Z
-updated: 2025-12-15T09:25:00.584Z
+updated: 2025-12-15T10:20:12.946Z
 type: context
 ---
 # Frontend Context
@@ -40,3 +40,28 @@ Apply ToruAI colors:
 - GET /api/history - Task history
 - GET/POST/DELETE /api/quick-actions - Quick actions
 - WS /api/ws - Real-time terminal
+
+## 2025-12-15T10:20:12.946Z
+
+## Key Implementation Notes
+
+### Routing
+- `/` - Dashboard (system stats + quick actions)
+- `/system-monitor` - Detailed system monitoring with charts
+- `/scripts` - Script execution with terminal output
+- `/history` - Task execution history
+- `/settings` - Scripts directory + quick action management
+
+### Quick Actions Flow
+Dashboard -> click Quick Action -> navigates to `/scripts?script=<name>` -> Scripts page auto-selects script
+
+### Type Imports
+Project uses `verbatimModuleSyntax` in TypeScript. Always use:
+```typescript
+import { api } from '../lib/api';
+import type { QuickAction } from '../lib/api';
+```
+Not:
+```typescript
+import { api, QuickAction } from '../lib/api'; // Error!
+```

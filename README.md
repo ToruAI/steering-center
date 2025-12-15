@@ -31,6 +31,12 @@ This is a foundation. Out of the box you get system monitoring and script execut
 - **Custom pages** - build dashboards for any data source
 - **Alerts & notifications** - Slack, email, webhooks
 
+## Prerequisites
+
+- **Rust** - Latest stable ([install](https://rustup.rs))
+- **Node.js 20+** - With npm ([install](https://nodejs.org))
+- **Unix-like OS** - Linux or macOS
+
 ## Quick Start
 
 ```bash

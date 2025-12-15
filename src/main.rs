@@ -56,7 +56,25 @@ async fn main() -> anyhow::Result<()> {
         .with_state(state);
     
     // Start server
-    let addr = SocketAddr::from(([0, 0, 0, 0], 3000));
+    // Bind to localhost only - use Cloudflare Tunnel or reverse proxy for external access
+    // Set STEERING_HOST=0.0.0.0 to bind to all interfaces if needed
+    let host: [u8; 4] = std::env::var("STEERING_HOST")
+        .ok()
+        .and_then(|h| {
+            if h == "0.0.0.0" {
+                Some([0, 0, 0, 0])
+            } else {
+                None
+            }
+        })
+        .unwrap_or([127, 0, 0, 1]);
+    
+    let port: u16 = std::env::var("STEERING_PORT")
+        .ok()
+        .and_then(|p| p.parse().ok())
+        .unwrap_or(3000);
+    
+    let addr = SocketAddr::from((host, port));
     tracing::info!("Server listening on {}", addr);
     
     let listener = tokio::net::TcpListener::bind(addr).await?;

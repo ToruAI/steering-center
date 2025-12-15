@@ -1,5 +1,5 @@
 import { Link, useLocation } from 'react-router-dom';
-import { Home, Terminal, Settings, Activity } from 'lucide-react';
+import { Home, Terminal, Settings, Activity, History } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { Separator } from '@/components/ui/separator';
 import { ToruLogo } from './ToruLogo';
@@ -15,6 +15,7 @@ export function Layout({ children }: LayoutProps) {
     { path: '/', icon: Home, label: 'Dashboard' },
     { path: '/system-monitor', icon: Activity, label: 'System Monitor' },
     { path: '/scripts', icon: Terminal, label: 'Scripts' },
+    { path: '/history', icon: History, label: 'History' },
     { path: '/settings', icon: Settings, label: 'Settings' },
   ];
 

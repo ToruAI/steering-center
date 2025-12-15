@@ -126,6 +126,14 @@ The SQLite database (`steering.db`) contains:
 
 ## Configuration
 
+### Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `STEERING_HOST` | `127.0.0.1` | Bind address. Set to `0.0.0.0` to allow external connections |
+| `STEERING_PORT` | `3000` | Server port |
+| `RUST_LOG` | `steering_center=info` | Log level (debug, info, warn, error) |
+
 ### Scripts Directory
 
 By default, scripts are loaded from `./scripts`. Change this in Settings or by updating the `scripts_dir` setting in the database.

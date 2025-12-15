@@ -11,7 +11,7 @@ use uuid::Uuid;
 
 use crate::db;
 use crate::routes::api::AppState;
-use crate::services::executor::{self, TaskMessage};
+use crate::services::executor::{self, TaskMessage, TaskRegistry};
 
 #[derive(Deserialize)]
 struct ClientMessage {
@@ -91,7 +91,7 @@ async fn handle_socket(socket: axum::extract::ws::WebSocket, state: AppState) {
                     }
                     
                     // Execute script
-                    let child = match executor::execute_script(&script_path, task_id.clone(), registry.clone()).await {
+                    let mut child = match executor::execute_script(&script_path).await {
                         Ok(child) => child,
                         Err(e) => {
                             let error_msg = TaskMessage {
@@ -108,114 +108,37 @@ async fn handle_socket(socket: axum::extract::ws::WebSocket, state: AppState) {
                         }
                     };
                     
-                    // Store in registry for cancellation BEFORE spawning streaming task
-                    executor::store_task(task_id.clone(), child, registry.clone()).await;
+                    // Take stdout/stderr BEFORE storing in registry
+                    let stdout = child.stdout.take().expect("stdout not captured");
+                    let stderr = child.stderr.take().expect("stderr not captured");
                     
-                    // Spawn a task to handle streaming
+                    // Store in registry for cancellation (child still owns the process handle)
+                    executor::store_task(task_id.clone(), child, &registry).await;
+                    
+                    // Spawn streaming task
                     let task_id_clone = task_id.clone();
                     let sender_clone = sender.clone();
                     let db_clone = state.db.clone();
                     let registry_clone = registry.clone();
                     
                     tokio::spawn(async move {
-                        // Get child from registry
-                        let child = {
-                            let mut reg = registry_clone.lock().await;
-                            reg.remove(&task_id_clone)
-                        };
-                        
-                        if let Some(mut child) = child {
-                            let stdout = child.stdout.take().unwrap();
-                            let stderr = child.stderr.take().unwrap();
-                            
-                            let mut stdout_reader = BufReader::new(stdout);
-                            let mut stderr_reader = BufReader::new(stderr);
-                            let mut output = String::new();
-                            let mut stdout_line = String::new();
-                            let mut stderr_line = String::new();
-                            
-                            loop {
-                                tokio::select! {
-                                    result = stdout_reader.read_line(&mut stdout_line) => {
-                                        match result {
-                                            Ok(0) => break,
-                                            Ok(_) => {
-                                                let line = stdout_line.clone();
-                                                output.push_str(&line);
-                                                let msg = TaskMessage {
-                                                    r#type: "stdout".to_string(),
-                                                    task_id: Some(task_id_clone.clone()),
-                                                    data: Some(line.trim_end().to_string()),
-                                                    code: None,
-                                                };
-                                                let mut s = sender_clone.lock().await;
-                                                let _ = s.send(Message::Text(
-                                                    serde_json::to_string(&msg).unwrap(),
-                                                )).await;
-                                                stdout_line.clear();
-                                            }
-                                            Err(_) => break,
-                                        }
-                                    }
-                                    result = stderr_reader.read_line(&mut stderr_line) => {
-                                        match result {
-                                            Ok(0) => {}
-                                            Ok(_) => {
-                                                let line = stderr_line.clone();
-                                                output.push_str(&line);
-                                                let msg = TaskMessage {
-                                                    r#type: "stderr".to_string(),
-                                                    task_id: Some(task_id_clone.clone()),
-                                                    data: Some(line.trim_end().to_string()),
-                                                    code: None,
-                                                };
-                                                let mut s = sender_clone.lock().await;
-                                                let _ = s.send(Message::Text(
-                                                    serde_json::to_string(&msg).unwrap(),
-                                                )).await;
-                                                stderr_line.clear();
-                                            }
-                                            Err(_) => {}
-                                        }
-                                    }
-                                }
-                            }
-                            
-                            let status = child.wait().await;
-                            let exit_code = status.ok().and_then(|s| s.code()).unwrap_or(-1);
-                            
-                            // Update task history
-                            let finished_at = chrono::Utc::now().to_rfc3339();
-                            let output_str = if output.is_empty() { None } else { Some(output.as_str()) };
-                            let _ = db::update_task_history(
-                                &db_clone,
-                                &task_id_clone,
-                                &finished_at,
-                                exit_code,
-                                output_str,
-                            ).await;
-                            
-                            // Send exit message
-                            let exit_msg = TaskMessage {
-                                r#type: "exit".to_string(),
-                                task_id: Some(task_id_clone),
-                                data: None,
-                                code: Some(exit_code),
-                            };
-                            let mut s = sender_clone.lock().await;
-                            let _ = s.send(Message::Text(
-                                serde_json::to_string(&exit_msg).unwrap(),
-                            )).await;
-                        }
+                        stream_task_output(
+                            task_id_clone,
+                            stdout,
+                            stderr,
+                            sender_clone,
+                            db_clone,
+                            registry_clone,
+                        ).await;
                     });
                 }
             }
             "cancel" => {
                 if let Some(task_id) = client_msg.task_id {
-                    if executor::cancel_task(&task_id, registry.clone()).await.unwrap_or(false) {
+                    if executor::cancel_task(&task_id, &registry).await.unwrap_or(false) {
                         let cancelled_msg = TaskMessage {
                             r#type: "cancelled".to_string(),
-                            task_id: Some(task_id),
+                            task_id: Some(task_id.clone()),
                             data: None,
                             code: None,
                         };
@@ -223,10 +146,119 @@ async fn handle_socket(socket: axum::extract::ws::WebSocket, state: AppState) {
                         let _ = s.send(Message::Text(
                             serde_json::to_string(&cancelled_msg).unwrap(),
                         )).await;
+                        
+                        // Clean up registry
+                        executor::remove_task(&task_id, &registry).await;
                     }
                 }
             }
             _ => {}
         }
     }
+}
+
+/// Streams stdout/stderr from a running task to the WebSocket client
+async fn stream_task_output(
+    task_id: String,
+    stdout: tokio::process::ChildStdout,
+    stderr: tokio::process::ChildStderr,
+    sender: Arc<Mutex<futures::stream::SplitSink<axum::extract::ws::WebSocket, Message>>>,
+    db: crate::db::DbPool,
+    registry: TaskRegistry,
+) {
+    let mut stdout_reader = BufReader::new(stdout);
+    let mut stderr_reader = BufReader::new(stderr);
+    let mut output = String::new();
+    let mut stdout_line = String::new();
+    let mut stderr_line = String::new();
+    let mut stdout_done = false;
+    let mut stderr_done = false;
+    
+    // Stream output until both streams are closed
+    while !stdout_done || !stderr_done {
+        tokio::select! {
+            result = stdout_reader.read_line(&mut stdout_line), if !stdout_done => {
+                match result {
+                    Ok(0) => stdout_done = true,
+                    Ok(_) => {
+                        let line = stdout_line.clone();
+                        output.push_str(&line);
+                        let msg = TaskMessage {
+                            r#type: "stdout".to_string(),
+                            task_id: Some(task_id.clone()),
+                            data: Some(line.trim_end().to_string()),
+                            code: None,
+                        };
+                        let mut s = sender.lock().await;
+                        let _ = s.send(Message::Text(
+                            serde_json::to_string(&msg).unwrap(),
+                        )).await;
+                        stdout_line.clear();
+                    }
+                    Err(_) => stdout_done = true,
+                }
+            }
+            result = stderr_reader.read_line(&mut stderr_line), if !stderr_done => {
+                match result {
+                    Ok(0) => stderr_done = true,
+                    Ok(_) => {
+                        let line = stderr_line.clone();
+                        output.push_str(&line);
+                        let msg = TaskMessage {
+                            r#type: "stderr".to_string(),
+                            task_id: Some(task_id.clone()),
+                            data: Some(line.trim_end().to_string()),
+                            code: None,
+                        };
+                        let mut s = sender.lock().await;
+                        let _ = s.send(Message::Text(
+                            serde_json::to_string(&msg).unwrap(),
+                        )).await;
+                        stderr_line.clear();
+                    }
+                    Err(_) => stderr_done = true,
+                }
+            }
+        }
+    }
+    
+    // Get the child process to wait for exit
+    let exit_code = if let Some(handle) = executor::get_task(&task_id, &registry).await {
+        let mut child_opt = handle.lock().await;
+        if let Some(ref mut child) = *child_opt {
+            let status = child.wait().await;
+            status.ok().and_then(|s| s.code()).unwrap_or(-1)
+        } else {
+            // Process was killed (cancelled)
+            -1
+        }
+    } else {
+        -1
+    };
+    
+    // Clean up registry
+    executor::remove_task(&task_id, &registry).await;
+    
+    // Update task history
+    let finished_at = chrono::Utc::now().to_rfc3339();
+    let output_str = if output.is_empty() { None } else { Some(output.as_str()) };
+    let _ = db::update_task_history(
+        &db,
+        &task_id,
+        &finished_at,
+        exit_code,
+        output_str,
+    ).await;
+    
+    // Send exit message
+    let exit_msg = TaskMessage {
+        r#type: "exit".to_string(),
+        task_id: Some(task_id),
+        data: None,
+        code: Some(exit_code),
+    };
+    let mut s = sender.lock().await;
+    let _ = s.send(Message::Text(
+        serde_json::to_string(&exit_msg).unwrap(),
+    )).await;
 }

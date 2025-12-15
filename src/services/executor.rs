@@ -3,7 +3,6 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::process::Stdio;
 use std::sync::Arc;
-use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command as TokioCommand;
 use tokio::sync::Mutex;
 
@@ -18,16 +17,17 @@ pub struct TaskMessage {
     pub code: Option<i32>,
 }
 
-pub type TaskRegistry = Arc<Mutex<HashMap<String, tokio::process::Child>>>;
+/// Stores the child process handle for cancellation
+pub type TaskRegistry = Arc<Mutex<HashMap<String, Arc<Mutex<Option<tokio::process::Child>>>>>>;
 
 pub fn create_task_registry() -> TaskRegistry {
     Arc::new(Mutex::new(HashMap::new()))
 }
 
+/// Spawns a script and returns stdout/stderr handles separately.
+/// The Child is wrapped for safe cancellation while streaming.
 pub async fn execute_script(
     script_path: &str,
-    _task_id: String,
-    _registry: TaskRegistry,
 ) -> Result<tokio::process::Child> {
     let child = TokioCommand::new("sh")
         .arg(script_path)
@@ -38,63 +38,40 @@ pub async fn execute_script(
     Ok(child)
 }
 
-pub async fn store_task(task_id: String, child: tokio::process::Child, registry: TaskRegistry) {
+/// Stores task handle in registry for cancellation support
+pub async fn store_task(task_id: String, child: tokio::process::Child, registry: &TaskRegistry) {
     let mut reg = registry.lock().await;
-    reg.insert(task_id, child);
+    reg.insert(task_id, Arc::new(Mutex::new(Some(child))));
 }
 
-pub async fn cancel_task(task_id: &str, registry: TaskRegistry) -> Result<bool> {
-    let mut reg = registry.lock().await;
-    if let Some(mut child) = reg.remove(task_id) {
-        child.kill().await?;
-        Ok(true)
-    } else {
-        Ok(false)
-    }
+/// Gets the task handle from registry (does not remove it)
+pub async fn get_task(task_id: &str, registry: &TaskRegistry) -> Option<Arc<Mutex<Option<tokio::process::Child>>>> {
+    let reg = registry.lock().await;
+    reg.get(task_id).cloned()
 }
 
-pub async fn stream_output(
-    mut child: tokio::process::Child,
-) -> Result<(i32, String)> {
-    let stdout = child.stdout.take().unwrap();
-    let stderr = child.stderr.take().unwrap();
+/// Removes task from registry (called after task completes)
+pub async fn remove_task(task_id: &str, registry: &TaskRegistry) {
+    let mut reg = registry.lock().await;
+    reg.remove(task_id);
+}
+
+/// Cancels a running task by killing the child process
+pub async fn cancel_task(task_id: &str, registry: &TaskRegistry) -> Result<bool> {
+    let task_handle = {
+        let reg = registry.lock().await;
+        reg.get(task_id).cloned()
+    };
     
-    let mut output = String::new();
-    let mut stdout_reader = BufReader::new(stdout);
-    let mut stderr_reader = BufReader::new(stderr);
-    
-    let mut stdout_line = String::new();
-    let mut stderr_line = String::new();
-    
-    loop {
-        tokio::select! {
-            result = stdout_reader.read_line(&mut stdout_line) => {
-                match result {
-                    Ok(0) => break,
-                    Ok(_) => {
-                        output.push_str(&stdout_line);
-                        stdout_line.clear();
-                    }
-                    Err(_) => break,
-                }
-            }
-            result = stderr_reader.read_line(&mut stderr_line) => {
-                match result {
-                    Ok(0) => {}
-                    Ok(_) => {
-                        output.push_str(&stderr_line);
-                        stderr_line.clear();
-                    }
-                    Err(_) => {}
-                }
-            }
+    if let Some(handle) = task_handle {
+        let mut child_opt = handle.lock().await;
+        if let Some(ref mut child) = *child_opt {
+            child.kill().await?;
+            *child_opt = None; // Mark as killed
+            return Ok(true);
         }
     }
-    
-    let status = child.wait().await?;
-    let exit_code = status.code().unwrap_or(-1);
-    
-    Ok((exit_code, output))
+    Ok(false)
 }
 
 

@@ -1,5 +1,9 @@
+import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useSystemStats } from '../hooks/useSystemStats';
 import { formatUptime, formatBytes } from '../lib/utils';
+import { api } from '../lib/api';
+import type { QuickAction } from '../lib/api';
 import { 
   Cpu, 
   MemoryStick, 
@@ -7,14 +11,39 @@ import {
   HardDrive,
   AlertCircle,
   RefreshCw,
+  Zap,
+  Play,
+  ChevronRight,
 } from 'lucide-react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 
 export function Dashboard() {
   const { stats, loading, error } = useSystemStats(5000);
+  const [quickActions, setQuickActions] = useState<QuickAction[]>([]);
+  const [loadingActions, setLoadingActions] = useState(true);
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    const fetchQuickActions = async () => {
+      try {
+        const actions = await api.getQuickActions();
+        setQuickActions(actions);
+      } catch (err) {
+        console.error('Failed to fetch quick actions:', err);
+      } finally {
+        setLoadingActions(false);
+      }
+    };
+    fetchQuickActions();
+  }, []);
+
+  const handleRunQuickAction = (action: QuickAction) => {
+    // Navigate to scripts page with the script pre-selected
+    navigate(`/scripts?script=${encodeURIComponent(action.script_path)}`);
+  };
 
   if (error) {
     console.error('Dashboard: Error loading system stats', error);
@@ -153,6 +182,70 @@ export function Dashboard() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Quick Actions */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Zap className="h-5 w-5" />
+              <CardTitle>Quick Actions</CardTitle>
+            </div>
+            <Button 
+              variant="ghost" 
+              size="sm" 
+              onClick={() => navigate('/settings')}
+              className="text-muted-foreground"
+            >
+              Manage
+              <ChevronRight className="h-4 w-4 ml-1" />
+            </Button>
+          </div>
+          <CardDescription>
+            Execute frequently used scripts with one click
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {loadingActions ? (
+            <div className="flex items-center justify-center py-8">
+              <RefreshCw className="h-4 w-4 animate-spin text-muted-foreground" />
+            </div>
+          ) : quickActions.length === 0 ? (
+            <div className="rounded-lg border border-dashed p-8 text-center">
+              <Zap className="mx-auto h-8 w-8 text-muted-foreground opacity-50 mb-2" />
+              <p className="text-sm text-muted-foreground mb-3">
+                No quick actions configured yet.
+              </p>
+              <Button 
+                variant="outline" 
+                size="sm"
+                onClick={() => navigate('/settings')}
+              >
+                Add Quick Action
+              </Button>
+            </div>
+          ) : (
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {quickActions.map((action) => (
+                <Button
+                  key={action.id}
+                  variant="outline"
+                  className="h-auto py-4 px-4 justify-start"
+                  onClick={() => handleRunQuickAction(action)}
+                >
+                  <Play className="h-4 w-4 mr-3 text-primary" />
+                  <div className="text-left">
+                    <div className="font-medium">{action.name}</div>
+                    <div className="text-xs text-muted-foreground truncate max-w-[150px]">
+                      {action.script_path}
+                    </div>
+                  </div>
+                </Button>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }

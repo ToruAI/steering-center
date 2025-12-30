@@ -24,6 +24,14 @@ frontend/.vite/
 *.swo
 *~
 
+# Logs
+logs/
+*.log
+
+# Plugin binaries
+*.binary
+plugins/*.binary
+
 # OS
 .DS_Store
 Thumbs.db

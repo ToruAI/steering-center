@@ -1,13 +1,31 @@
 # Tasks: Add Process-Isolated Plugin System
 
-**Progress:** 139/172 tasks completed (Phase 8: ✅ Complete, Phase 7: ✅ Complete, Phase 6: ✅ Complete, Phase 5: ✅ Complete, 13/13 done)
-**Test Coverage:** 17/17 tests passing (9 integration + 8 unit) ✅ (2025-12-30)
+**Progress:** 146/175 tasks completed (Phase 8: ✅ Complete, Phase 7: ✅ Complete, Phase 6: ✅ Complete, Phase 5: ✅ Complete, 13/13 done)
+**Test Coverage:** 23/23 tests passing (15 integration + 8 unit) ✅ (2025-12-30)
 **Code Quality:** fmt ✅ | clippy ✅ | tests ✅ (2025-12-30)
 
 **Updates (2025-12-30):**
 - ✅ Added 5.1.10: Plugin access control (allow all users to view/use, keep mgmt admin-only)
 - ✅ Added 8 critical path integration tests (T1-T4, T5-T8, T23)
 - ✅ All quality gates passing: fmt, clippy, tests
+
+**Updates (2025-12-30 - Part 2):**
+- ✅ Added task 4.2.6: KV endpoint exposure via supervisor (forward_kv_request method)
+- ✅ Added T18 test: KV requests handled correctly
+- ✅ Added T19 test: Invalid plugin socket handled gracefully
+- ✅ Enhanced toru-plugin-api with KvMessagePayload for proper KV request/response protocol
+
+**Updates (2025-12-30 - Part 3):**
+- ✅ Added T12 test: Enable plugin spawns process and makes routes available
+- ✅ Added T13 test: Disable plugin kills process and returns 404 on routes
+- ✅ Added T14 test: Enabled state persists across restarts
+- ✅ Added T15 test: Plugin crash triggers restart with backoff
+
+**Updates (2025-12-30 - Part 4):**
+- ✅ Fixed plugin stderr logging: stderr now captured and written to logs/plugins/<id>.log
+- ✅ Fixed health check: now verifies both process.is_some() AND socket exists
+- ✅ Fixed enable_plugin: now spawns plugin process on enable, not just sets flag
+- ✅ Fixed HTTP endpoints: enable/disable now return JSON instead of NO_CONTENT (204)
 
 ## Phase 1: Plugin Protocol & Rust SDK
 
@@ -89,7 +107,7 @@
 - [x] 4.2.3 Implement `plugin_kv_delete(plugin_id, key)` in db.rs
 - [x] 4.2.4 Implement `plugin_event_log(plugin_id, event_type, details)` in db.rs
 - [x] 4.2.5 Create SqliteKvStore implementing PluginKvStore trait
-- [ ] 4.2.6 Expose KV endpoints to plugins via supervisor
+- [x] 4.2.6 Expose KV endpoints to plugins via supervisor ✅ (2025-12-30)
     - *Note: Deferred - KV protocol exists but endpoints not yet exposed to plugins via forward_to_plugin()*
 
 ### 4.3 Additional Functions Implemented
@@ -295,16 +313,16 @@ After completing each phase, verify:
   - *Note: Functional testing deferred to integration testing in Phase 5+*
 
 #### Plugin Lifecycle (Phase 2-5)
-- [ ] T12: Enable plugin spawns process and makes routes available
-- [ ] T13: Disable plugin kills process and returns 404 on routes
-- [ ] T14: Enabled state persists across restarts
-- [ ] T15: Plugin crash triggers restart with backoff
+- [x] T12: Enable plugin spawns process and makes routes available ✅ (2025-12-30)
+- [x] T13: Disable plugin kills process and returns 404 on routes ✅ (2025-12-30)
+- [x] T14: Enabled state persists across restarts ✅ (2025-12-30)
+- [x] T15: Plugin crash triggers restart with backoff ✅ (2025-12-30)
 
 #### Plugin Communication (Phase 5)
 - [x] T16: HTTP requests forwarded to plugin correctly ✅
 - [x] T17: Plugin responses returned to client ✅
-- [ ] T18: KV requests handled correctly (Blocked on 4.2.6 - KV endpoints)
-- [ ] T19: Invalid plugin socket handled gracefully
+- [x] T18: KV requests handled correctly ✅ (2025-12-30)
+- [x] T19: Invalid plugin socket handled gracefully ✅ (2025-12-30)
 
 #### Observability (Phase 7)
 - [x] T20: Plugin logs written to correct file

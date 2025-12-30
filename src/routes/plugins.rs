@@ -35,7 +35,7 @@ impl From<&PluginProcess> for PluginStatus {
     fn from(process: &PluginProcess) -> Self {
         let health = if !process.enabled {
             "disabled".to_string()
-        } else if !process.socket_path.is_empty() && PathBuf::from(&process.socket_path).exists() {
+        } else if process.process.is_some() && !process.socket_path.is_empty() && PathBuf::from(&process.socket_path).exists() {
             "healthy".to_string()
         } else {
             "unhealthy".to_string()
@@ -242,7 +242,7 @@ async fn enable_plugin(
     _auth: AdminUser,
     State(state): State<AppState>,
     Path(id): Path<String>,
-) -> Result<StatusCode, (StatusCode, Json<serde_json::Value>)> {
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
     let mut supervisor = state
         .supervisor
         .as_ref()
@@ -268,7 +268,7 @@ async fn enable_plugin(
         )
     })?;
 
-    Ok(StatusCode::NO_CONTENT)
+    Ok(Json(serde_json::json!({ "success": true })))
 }
 
 /// Disable a plugin
@@ -276,7 +276,7 @@ async fn disable_plugin(
     _auth: AdminUser,
     State(state): State<AppState>,
     Path(id): Path<String>,
-) -> Result<StatusCode, (StatusCode, Json<serde_json::Value>)> {
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
     let mut supervisor = state
         .supervisor
         .as_ref()
@@ -302,7 +302,7 @@ async fn disable_plugin(
         )
     })?;
 
-    Ok(StatusCode::NO_CONTENT)
+    Ok(Json(serde_json::json!({ "success": true })))
 }
 
 /// Get plugin frontend bundle (available to all authenticated users)

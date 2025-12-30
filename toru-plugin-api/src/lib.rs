@@ -6,7 +6,7 @@ pub mod types;
 pub use error::{PluginError, PluginResult};
 pub use message::Message;
 pub use protocol::PluginProtocol;
-pub use types::*;
+pub use types::{KvMessagePayload, *};
 
 #[async_trait::async_trait]
 pub trait ToruPlugin {

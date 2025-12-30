@@ -74,7 +74,19 @@ pub enum MessagePayload {
         payload: HttpRequest,
     },
     #[serde(rename = "kv")]
-    Kv { request_id: String, payload: KvOp },
+    Kv {
+        request_id: String,
+        #[serde(flatten)]
+        payload: KvMessagePayload,
+    },
+}
+
+/// KV message payload - can be either a request (operation) or response (value)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum KvMessagePayload {
+    Request(KvOp),
+    Response { value: Option<String> },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -120,7 +132,21 @@ impl Message {
             request_id: Some(request_id),
             payload: MessagePayload::Kv {
                 request_id: request_id_clone,
-                payload,
+                payload: KvMessagePayload::Request(payload),
+            },
+        }
+    }
+
+    /// Create a KV response message (used by plugins to respond to KV operations)
+    pub fn new_kv_response(request_id: String, value: Option<String>) -> Self {
+        let request_id_clone = request_id.clone();
+        Self {
+            message_type: "kv".to_string(),
+            timestamp: Utc::now(),
+            request_id: Some(request_id),
+            payload: MessagePayload::Kv {
+                request_id: request_id_clone,
+                payload: KvMessagePayload::Response { value },
             },
         }
     }

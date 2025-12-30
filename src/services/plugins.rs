@@ -210,7 +210,7 @@ impl PluginSupervisor {
             fs::remove_file(&socket_path).ok();
         }
 
-        let child = tokio::process::Command::new(binary_path)
+        let mut child = tokio::process::Command::new(binary_path)
             .env("TORU_PLUGIN_SOCKET", &socket_path_str)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -218,6 +218,39 @@ impl PluginSupervisor {
             .context("Failed to spawn plugin process")?;
 
         let pid = child.id();
+
+        // Capture stderr to plugin log file
+        if let Some(mut stderr) = child.stderr.take() {
+            let plugin_logger = Arc::clone(&self.plugin_logger);
+            let plugin_id_clone = plugin_id.to_string();
+
+            tokio::spawn(async move {
+                use tokio::io::AsyncReadExt;
+                let mut buffer = [0u8; 4096];
+
+                loop {
+                    match stderr.read(&mut buffer).await {
+                        Ok(0) => break, // EOF
+                        Ok(n) => {
+                            let output = String::from_utf8_lossy(&buffer[..n]).to_string();
+                            // Parse structured JSON logs or write as plain text
+                            if let Ok(log_entry) = serde_json::from_str::<crate::services::logging::LogEntry>(&output) {
+                                let _ = plugin_logger.log_plugin(log_entry).await;
+                            } else {
+                                // Write plain text as Info log
+                                let log_entry = crate::services::logging::LogEntry::new(
+                                    crate::services::logging::LogLevel::Info,
+                                    &output.trim()
+                                ).with_plugin(&plugin_id_clone);
+                                let _ = plugin_logger.log_plugin(log_entry).await;
+                            }
+                        }
+                        Ok(0) => break, // EOF
+                        Err(_) => break, // Error
+                    }
+                }
+            });
+        }
 
         let process = PluginProcess {
             id: plugin_id.to_string(),
@@ -512,7 +545,26 @@ impl PluginSupervisor {
         self.set_plugin_enabled(plugin_id, true).await?;
 
         if let Some(process) = self.plugins.get_mut(plugin_id) {
-            process.enabled = true;
+            // If plugin is disabled or not running, spawn it
+            if !process.enabled || process.process.is_none() {
+                // Get binary path from plugins directory
+                let binary_path = self.plugins_dir.join(format!("{}.binary", plugin_id));
+                if let Some(metadata) = process.metadata.clone() {
+                    // Spawn the plugin
+                    drop(process); // Release lock before spawning
+                    self.spawn_plugin(plugin_id, &binary_path, metadata).await?;
+                } else {
+                    process.enabled = true;
+                }
+            } else {
+                process.enabled = true;
+            }
+        } else {
+            // Plugin not in memory, need to discover and spawn it
+            let discovered = self.scan_plugins_directory().await?;
+            if let Some((binary_path, metadata)) = discovered.get(plugin_id) {
+                self.spawn_plugin(plugin_id, binary_path, metadata.clone()).await?;
+            }
         }
 
         info!("Plugin {} enabled", plugin_id);

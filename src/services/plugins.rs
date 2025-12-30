@@ -3,12 +3,15 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::sync::Arc;
 use tokio::io::AsyncWriteExt;
 use tokio::net::UnixStream;
 use tokio::process::Child;
 use tracing::{debug, error, info, warn};
 
 use toru_plugin_api::{Message, PluginMetadata};
+
+use super::logging::{LogLevel, PluginLogger, SupervisorLogger};
 
 /// Represents a running plugin process
 #[derive(Debug)]
@@ -31,6 +34,8 @@ pub struct PluginSupervisor {
     sockets_dir: PathBuf,
     max_restarts: u32,
     instance_id: String,
+    plugin_logger: Arc<PluginLogger>,
+    supervisor_logger: Arc<SupervisorLogger>,
 }
 
 impl PluginSupervisor {
@@ -48,11 +53,20 @@ impl PluginSupervisor {
         let plugins_dir = plugins_dir.as_ref().to_path_buf();
         let metadata_dir = plugins_dir.join(".metadata");
         let sockets_dir = PathBuf::from("/tmp/toru-plugins");
+        let log_dir = PathBuf::from("/var/log/toru");
 
         // Create directories if they don't exist
         fs::create_dir_all(&plugins_dir).context("Failed to create plugins directory")?;
         fs::create_dir_all(&metadata_dir).context("Failed to create metadata directory")?;
         fs::create_dir_all(&sockets_dir).context("Failed to create sockets directory")?;
+
+        // Initialize loggers
+        let plugin_logger = Arc::new(PluginLogger::new(super::logging::LogConfig {
+            log_dir: log_dir.clone(),
+            ..Default::default()
+        })?);
+
+        let supervisor_logger = Arc::new(SupervisorLogger::new(&log_dir)?);
 
         Ok(Self {
             plugins: HashMap::new(),
@@ -62,7 +76,14 @@ impl PluginSupervisor {
             sockets_dir,
             max_restarts,
             instance_id,
+            plugin_logger,
+            supervisor_logger,
         })
+    }
+
+    /// Get a reference to the plugin logger
+    pub fn plugin_logger(&self) -> Arc<PluginLogger> {
+        Arc::clone(&self.plugin_logger)
     }
 
     /// Scan the plugins directory for .binary files and load metadata
@@ -203,6 +224,17 @@ impl PluginSupervisor {
         self.plugins.insert(plugin_id.to_string(), process);
         info!("Spawned plugin: {} (PID: {:?})", plugin_id, pid);
 
+        // Log spawn event
+        let _ = self
+            .supervisor_logger
+            .log_plugin_event(
+                LogLevel::Info,
+                plugin_id,
+                "spawned",
+                Some(&format!("PID: {:?}", pid)),
+            )
+            .await;
+
         Ok(())
     }
 
@@ -247,6 +279,12 @@ impl PluginSupervisor {
 
         process.enabled = false;
         info!("Plugin {} killed and disabled", plugin_id);
+
+        // Log kill event
+        let _ = self
+            .supervisor_logger
+            .log_plugin_event(LogLevel::Info, plugin_id, "killed", None)
+            .await;
 
         Ok(())
     }
@@ -435,6 +473,13 @@ impl PluginSupervisor {
         }
 
         info!("Plugin {} enabled", plugin_id);
+
+        // Log enable event
+        let _ = self
+            .supervisor_logger
+            .log_plugin_event(LogLevel::Info, plugin_id, "enabled", None)
+            .await;
+
         Ok(())
     }
 
@@ -444,6 +489,13 @@ impl PluginSupervisor {
         self.kill_plugin(plugin_id).await?;
 
         info!("Plugin {} disabled", plugin_id);
+
+        // Log disable event
+        let _ = self
+            .supervisor_logger
+            .log_plugin_event(LogLevel::Info, plugin_id, "disabled", None)
+            .await;
+
         Ok(())
     }
 
@@ -599,7 +651,16 @@ impl PluginSupervisor {
             );
 
             // Log crash event
-            // Note: Database access will be added when supervisor is integrated with AppState
+            let _ = self
+                .supervisor_logger
+                .log_plugin_event(
+                    LogLevel::Error,
+                    plugin_id,
+                    "disabled_after_max_restarts",
+                    Some(&format!("restarts: {}", restart_count)),
+                )
+                .await;
+
             warn!(
                 "Plugin {} disabled after {} crashes",
                 plugin_id, restart_count
@@ -623,7 +684,19 @@ impl PluginSupervisor {
         );
 
         // Log crash event
-        // Note: Database access will be added when supervisor is integrated with AppState
+        let _ = self
+            .supervisor_logger
+            .log_plugin_event(
+                LogLevel::Warn,
+                plugin_id,
+                "restarting_with_backoff",
+                Some(&format!(
+                    "attempt #{}, delay: {}ms",
+                    restart_count, delay_ms
+                )),
+            )
+            .await;
+
         warn!(
             "Plugin {} crashed, restarting in {}ms (attempt #{})",
             plugin_id, delay_ms, restart_count

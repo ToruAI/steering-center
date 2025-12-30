@@ -146,9 +146,16 @@ export interface Plugin {
 export interface PluginLogEntry {
   timestamp: string;
   level: string;
-  plugin: string;
+  plugin: string | null;
   message: string;
   error?: string;
+  pid?: number;
+}
+
+export interface PluginLogsResponse {
+  logs: PluginLogEntry[];
+  page: number;
+  page_size: number;
 }
 
 async function handleResponse<T>(res: Response, endpoint: string): Promise<T> {
@@ -359,8 +366,14 @@ export const api = {
     await handleAuthResponse(res, `/plugins/${id}/disable`);
   },
 
-  getPluginLogs: async (id: string): Promise<PluginLogEntry[]> => {
-    const res = await request(`/plugins/${id}/logs`);
-    return handleAuthResponse(res, `/plugins/${id}/logs`);
+  getPluginLogs: async (id: string, options?: { page?: number; page_size?: number; level?: string }): Promise<PluginLogsResponse> => {
+    const params = new URLSearchParams();
+    if (options?.page !== undefined) params.set('page', options.page.toString());
+    if (options?.page_size !== undefined) params.set('page_size', options.page_size.toString());
+    if (options?.level) params.set('level', options.level);
+
+    const url = `/plugins/${id}/logs${params.toString() ? '?' + params.toString() : ''}`;
+    const res = await request(url);
+    return handleAuthResponse(res, url);
   },
 };

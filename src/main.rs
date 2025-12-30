@@ -18,7 +18,9 @@ use tower_http::{cors::CorsLayer, trace::TraceLayer};
 
 use crate::db::init_db;
 use crate::routes::api::AppState;
-use crate::routes::{create_api_router, create_auth_router, create_plugin_router, handle_websocket};
+use crate::routes::{
+    create_api_router, create_auth_router, create_plugin_router, handle_websocket,
+};
 
 #[derive(RustEmbed)]
 #[folder = "frontend/dist"]
@@ -83,7 +85,10 @@ async fn main() -> anyhow::Result<()> {
                 let mut guard = sup.lock().await;
                 match guard.initialize().await {
                     Ok(initialized) => {
-                        tracing::info!("Plugin supervisor initialized with {} plugins", initialized);
+                        tracing::info!(
+                            "Plugin supervisor initialized with {} plugins",
+                            initialized
+                        );
                     }
                     Err(e) => {
                         tracing::warn!("Failed to initialize plugins: {}", e);

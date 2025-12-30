@@ -1,6 +1,6 @@
 # Tasks: Add Process-Isolated Plugin System
 
-**Progress:** 92/172 tasks completed (Phase 6: ✅ Complete, Phase 5: 10/12 done, 1 deferred, 1 blocked)
+**Progress:** 108/172 tasks completed (Phase 7: ✅ Complete, Phase 6: ✅ Complete, Phase 5: 10/12 done, 1 deferred, 1 blocked)
 
 ## Phase 1: Plugin Protocol & Rust SDK
 
@@ -169,17 +169,36 @@ These tests should be run after Phase 8 (Example Plugins) is complete, when we h
 
 ## Phase 7: Logging & Observability
 
+**Status:** ✅ Complete (2025-12-30)
+
 ### 7.1 Structured Logging
-- [ ] 7.1.1 Create `/var/log/toru/plugins/` directory on startup
-- [ ] 7.1.2 Implement plugin log writer (append to file)
-- [ ] 7.1.3 Log format: JSON (timestamp, level, plugin, message, optional error)
-- [ ] 7.1.4 Write plugin supervisor logs to `/var/log/toru/plugin-supervisor.log`
-- [ ] 7.1.5 Rotate logs (size-based or time-based)
+- [x] 7.1.1 Create `/var/log/toru/plugins/` directory on startup
+- [x] 7.1.2 Implement plugin log writer (append to file)
+- [x] 7.1.3 Log format: JSON (timestamp, level, plugin, message, optional error)
+- [x] 7.1.4 Write plugin supervisor logs to `/var/log/toru/plugin-supervisor.log`
+- [x] 7.1.5 Rotate logs (size-based or time-based)
 
 ### 7.2 Log API
-- [ ] 7.2.1 Implement `GET /api/plugins/:id/logs` endpoint
-- [ ] 7.2.2 Support pagination and filtering
-- [ ] 7.2.3 Return logs in JSON format
+- [x] 7.2.1 Implement `GET /api/plugins/:id/logs` endpoint
+- [x] 7.2.2 Support pagination and filtering
+- [x] 7.2.3 Return logs in JSON format
+
+**Implementation Notes:**
+- Created `src/services/logging.rs` module with:
+  - `LogLevel` enum for filtering
+  - `LogEntry` struct with JSON serialization
+  - `LogConfig` for rotation settings (10MB max, 5 rotated files)
+  - `PluginLogger` for per-plugin JSON logging
+  - `SupervisorLogger` for core plugin system events
+- Integrated logging into `PluginSupervisor`:
+  - Logs spawn, kill, enable, disable, restart events
+  - Each plugin gets its own log file: `/var/log/toru/plugins/<id>.log`
+  - Supervisor logs to `/var/log/toru/plugin-supervisor.log`
+- Enhanced `/api/plugins/:id/logs` endpoint with:
+  - `page` query parameter (default 0)
+  - `page_size` query parameter (default 100)
+  - `level` query parameter for filtering (trace/debug/info/warn/error)
+  - Returns newest logs first (descending timestamp)
 
 ## Phase 8: Example Plugins
 
@@ -270,9 +289,9 @@ After completing each phase, verify:
 - [ ] T19: Invalid plugin socket handled gracefully (Blocked on 5.1.8)
 
 #### Observability (Phase 7)
-- [ ] T20: Plugin logs written to correct file
-- [ ] T21: Logs are valid JSON
-- [ ] T22: Logs API returns correct logs
+- [x] T20: Plugin logs written to correct file
+- [x] T21: Logs are valid JSON
+- [x] T22: Logs API returns correct logs
 - [ ] T23: Plugin events written to database
 
 #### License Validation (Phase 9)

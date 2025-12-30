@@ -1,5 +1,5 @@
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::{header, StatusCode},
     response::{IntoResponse, Json},
     routing::{get, post},
@@ -11,6 +11,7 @@ use std::path::PathBuf;
 
 use crate::routes::api::AppState;
 use crate::routes::auth::AdminUser;
+use crate::services::logging::LogLevel;
 use crate::services::plugins::PluginProcess;
 
 /// Plugin status information
@@ -32,9 +33,7 @@ impl From<&PluginProcess> for PluginStatus {
     fn from(process: &PluginProcess) -> Self {
         let health = if !process.enabled {
             "disabled".to_string()
-        } else if !process.socket_path.is_empty()
-            && PathBuf::from(&process.socket_path).exists()
-        {
+        } else if !process.socket_path.is_empty() && PathBuf::from(&process.socket_path).exists() {
             "healthy".to_string()
         } else {
             "unhealthy".to_string()
@@ -57,7 +56,7 @@ impl From<&PluginProcess> for PluginStatus {
                 .metadata
                 .as_ref()
                 .map(|m| m.icon.clone())
-                .unwrap_or_else(|| "".to_string()),
+                .unwrap_or_default(),
             enabled: process.enabled,
             running: process.process.is_some(),
             health,
@@ -95,10 +94,7 @@ async fn list_plugins(
         .await;
     let plugins = supervisor.get_all_plugins();
 
-    let plugin_statuses: Vec<PluginStatus> = plugins
-        .values()
-        .map(PluginStatus::from)
-        .collect();
+    let plugin_statuses: Vec<PluginStatus> = plugins.values().map(PluginStatus::from).collect();
 
     Ok(Json(plugin_statuses))
 }
@@ -146,15 +142,12 @@ async fn enable_plugin(
         ));
     }
 
-    supervisor
-        .enable_plugin(&id)
-        .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({ "error": format!("Failed to enable plugin: {}", e) })),
-            )
-        })?;
+    supervisor.enable_plugin(&id).await.map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": format!("Failed to enable plugin: {}", e) })),
+        )
+    })?;
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -183,15 +176,12 @@ async fn disable_plugin(
         ));
     }
 
-    supervisor
-        .disable_plugin(&id)
-        .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({ "error": format!("Failed to disable plugin: {}", e) })),
-            )
-        })?;
+    supervisor.disable_plugin(&id).await.map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": format!("Failed to disable plugin: {}", e) })),
+        )
+    })?;
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -225,41 +215,66 @@ async fn get_plugin_bundle(
         return Err(StatusCode::NOT_FOUND);
     }
 
-    let content = fs::read_to_string(&bundle_path)
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let content =
+        fs::read_to_string(&bundle_path).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    Ok((
-        [(header::CONTENT_TYPE, "application/javascript")],
-        content,
-    ))
+    Ok(([(header::CONTENT_TYPE, "application/javascript")], content))
 }
 
-/// Get plugin logs
+#[derive(Deserialize)]
+struct LogQuery {
+    #[serde(default)]
+    page: usize,
+    #[serde(default = "default_page_size")]
+    page_size: usize,
+    #[serde(default)]
+    level: Option<String>,
+}
+
+fn default_page_size() -> usize {
+    100
+}
+
+/// Get plugin logs with pagination and filtering
 async fn get_plugin_logs(
     _auth: AdminUser,
+    State(state): State<AppState>,
     Path(id): Path<String>,
-) -> Result<Json<Vec<LogEntry>>, StatusCode> {
-    let log_path = format!("/var/log/toru/plugins/{}.log", id);
+    Query(query): Query<LogQuery>,
+) -> Result<Json<LogsResponse>, StatusCode> {
+    let supervisor = state
+        .supervisor
+        .as_ref()
+        .ok_or(StatusCode::NOT_IMPLEMENTED)?
+        .lock()
+        .await;
 
-    let content = fs::read_to_string(&log_path).map_err(|_| StatusCode::NOT_FOUND)?;
+    // Check if plugin exists
+    if supervisor.get_plugin_status(&id).is_none() {
+        return Err(StatusCode::NOT_FOUND);
+    }
 
-    let logs: Vec<LogEntry> = content
-        .lines()
-        .filter_map(|line| {
-            serde_json::from_str::<LogEntry>(line).ok()
-        })
-        .collect();
+    let plugin_logger = supervisor.plugin_logger();
 
-    Ok(Json(logs))
+    // Parse log level filter
+    let filter_level = query.level.as_ref().and_then(|l| LogLevel::from_str(l));
+
+    // Read logs with pagination and filtering
+    let logs = plugin_logger
+        .read_plugin_logs(&id, filter_level, query.page, query.page_size)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    Ok(Json(LogsResponse {
+        logs,
+        page: query.page,
+        page_size: query.page_size,
+    }))
 }
 
-#[derive(Serialize, Deserialize)]
-struct LogEntry {
-    timestamp: String,
-    level: String,
-    message: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    plugin: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    error: Option<String>,
+#[derive(Serialize)]
+struct LogsResponse {
+    logs: Vec<crate::services::logging::LogEntry>,
+    page: usize,
+    page_size: usize,
 }

@@ -21,6 +21,7 @@ use sysinfo::System;
 pub struct AppState {
     pub db: DbPool,
     pub sys: Arc<Mutex<System>>,
+    pub supervisor: Option<Arc<Mutex<crate::services::plugins::PluginSupervisor>>>,
 }
 
 pub fn create_api_router() -> Router<AppState> {

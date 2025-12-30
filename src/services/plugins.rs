@@ -315,6 +315,11 @@ impl PluginSupervisor {
         &self.plugins
     }
 
+    /// Get the plugins directory path
+    pub fn get_plugins_dir(&self) -> PathBuf {
+        self.plugins_dir.clone()
+    }
+
     /// Increment restart counter for a plugin
     ///
     /// # Arguments

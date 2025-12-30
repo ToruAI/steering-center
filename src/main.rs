@@ -18,7 +18,7 @@ use tower_http::{cors::CorsLayer, trace::TraceLayer};
 
 use crate::db::init_db;
 use crate::routes::api::AppState;
-use crate::routes::{create_api_router, create_auth_router, handle_websocket};
+use crate::routes::{create_api_router, create_auth_router, create_plugin_router, handle_websocket};
 
 #[derive(RustEmbed)]
 #[folder = "frontend/dist"]
@@ -66,6 +66,38 @@ async fn main() -> anyhow::Result<()> {
     let db = init_db()?;
     tracing::info!("Database initialized");
 
+    // Get or create instance ID
+    let instance_id = crate::db::get_or_create_instance_id(&db).await?;
+    tracing::info!("Instance ID: {}", instance_id);
+
+    // Initialize plugin supervisor
+    let supervisor = match crate::services::plugins::PluginSupervisor::new(
+        "./plugins",
+        10, // max 10 consecutive restarts before disabling
+        instance_id.clone(),
+    ) {
+        Ok(s) => {
+            let sup = Arc::new(Mutex::new(s));
+            // Initialize and start plugin supervision
+            {
+                let mut guard = sup.lock().await;
+                match guard.initialize().await {
+                    Ok(initialized) => {
+                        tracing::info!("Plugin supervisor initialized with {} plugins", initialized);
+                    }
+                    Err(e) => {
+                        tracing::warn!("Failed to initialize plugins: {}", e);
+                    }
+                }
+            }
+            Some(sup)
+        }
+        Err(e) => {
+            tracing::warn!("Failed to initialize plugin supervisor: {}", e);
+            None
+        }
+    };
+
     // Clean up expired sessions and old login attempts on startup
     if let Err(e) = crate::db::cleanup_expired_sessions(&db).await {
         tracing::warn!("Failed to cleanup expired sessions: {}", e);
@@ -85,6 +117,7 @@ async fn main() -> anyhow::Result<()> {
     let state = AppState {
         db: db.clone(),
         sys,
+        supervisor,
     };
 
     // Spawn background task to clean up expired sessions daily
@@ -113,11 +146,13 @@ async fn main() -> anyhow::Result<()> {
     // Create API router
     let api_router = create_api_router();
     let auth_router = create_auth_router();
+    let plugin_router = create_plugin_router();
 
     // Create main router
     let app = Router::new()
         .route("/api/ws", get(handle_websocket))
         .nest("/api/auth", auth_router)
+        .nest("/api/plugins", plugin_router)
         .nest("/api", api_router)
         .fallback(static_handler)
         .layer(TraceLayer::new_for_http())

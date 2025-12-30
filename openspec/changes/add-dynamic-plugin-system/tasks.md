@@ -1,6 +1,6 @@
 # Tasks: Add Process-Isolated Plugin System
 
-**Progress:** 45/172 tasks completed
+**Progress:** 66/172 tasks completed (Phase 5: 10/12 done, 1 deferred, 1 blocked)
 
 ## Phase 1: Plugin Protocol & Rust SDK
 
@@ -105,21 +105,38 @@
 ## Phase 5: Plugin API Routes
 
 ### 5.1 Backend Routes
-- [ ] 5.1.1 Create `src/routes/plugins.rs`
-- [ ] 5.1.2 Implement `GET /api/plugins` - list all plugins
-- [ ] 5.1.3 Implement `GET /api/plugins/:id` - get plugin details
-- [ ] 5.1.4 Implement `POST /api/plugins/:id/enable` - enable plugin
-- [ ] 5.1.5 Implement `POST /api/plugins/:id/disable` - disable plugin
-- [ ] 5.1.6 Implement `GET /api/plugins/:id/bundle.js` - serve frontend
-- [ ] 5.1.7 Implement `GET /api/plugins/:id/logs` - get plugin logs
+- [x] 5.1.1 Create `src/routes/plugins.rs`
+- [x] 5.1.2 Implement `GET /api/plugins` - list all plugins
+- [x] 5.1.3 Implement `GET /api/plugins/:id` - get plugin details
+- [x] 5.1.4 Implement `POST /api/plugins/:id/enable` - enable plugin
+- [x] 5.1.5 Implement `POST /api/plugins/:id/disable` - disable plugin
+- [x] 5.1.6 Implement `GET /api/plugins/:id/bundle.js` - serve frontend
+- [x] 5.1.7 Implement `GET /api/plugins/:id/logs` - get plugin logs
 - [ ] 5.1.8 Register dynamic plugin routes from enabled plugins
-- [ ] 5.1.9 Add auth middleware (require login for all plugin routes)
+- [x] 5.1.9 Add auth middleware (require login for all plugin routes)
 
 ### 5.2 Integration
-- [ ] 5.2.1 Initialize PluginSupervisor in main.rs
-- [ ] 5.2.2 Add PluginSupervisor to AppState
-- [ ] 5.2.3 Mount plugin routes in router
-- [ ] 5.2.4 Start plugin supervision on startup
+- [x] 5.2.1 Initialize PluginSupervisor in main.rs
+- [x] 5.2.2 Add PluginSupervisor to AppState
+- [x] 5.2.3 Mount plugin routes in router
+- [x] 5.2.4 Start plugin supervision on startup
+
+### 5.3 Testing Notes
+**Integration Tests (T12-T19) require:**
+- Actual plugin binaries (.binary files) in `./plugins/` directory
+- Manual smoke testing or automated integration tests
+- Tests T16-T19 are blocked on task 5.1.8 (dynamic plugin routes) and 4.2.6 (KV endpoints)
+
+**Implementation Status:**
+- ✅ Core management routes (enable/disable) - implemented
+- ✅ Plugin status API - implemented
+- ✅ Plugin logs endpoint - implemented
+- ✅ Bundle serving - implemented
+- ⏸️ HTTP proxying to plugins (5.1.8) - deferred (complex, low priority initially)
+- ⏸️ KV endpoint exposure (4.2.6) - blocked on Phase 5
+
+**Testing Strategy:**
+These tests should be run after Phase 8 (Example Plugins) is complete, when we have actual plugin binaries to test against.
 
 ## Phase 6: Frontend - Plugin Manager
 
@@ -245,10 +262,10 @@ After completing each phase, verify:
 - [ ] T15: Plugin crash triggers restart with backoff
 
 #### Plugin Communication (Phase 5)
-- [ ] T16: HTTP requests forwarded to plugin correctly
-- [ ] T17: Plugin responses returned to client
-- [ ] T18: KV requests handled correctly
-- [ ] T19: Invalid plugin socket handled gracefully
+- [ ] T16: HTTP requests forwarded to plugin correctly (Blocked on 5.1.8)
+- [ ] T17: Plugin responses returned to client (Blocked on 5.1.8)
+- [ ] T18: KV requests handled correctly (Blocked on 4.2.6 - KV endpoints)
+- [ ] T19: Invalid plugin socket handled gracefully (Blocked on 5.1.8)
 
 #### Observability (Phase 7)
 - [ ] T20: Plugin logs written to correct file
@@ -266,7 +283,7 @@ After completing each phase, verify:
 Request AI code review after:
 - [ ] R1: Plugin supervision implementation (security: process spawning)
 - [ ] R2: License validation (security: HMAC verification)
-- [ ] R3: Plugin routes (security: auth middleware)
+- [x] R3: Plugin routes (security: auth middleware)
 - [ ] R4: Socket communication (security: input validation)
 
 ## Validation (Manual Smoke Tests)

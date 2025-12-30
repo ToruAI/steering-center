@@ -1,4 +1,6 @@
+use crate::db::{self, DbPool, TaskHistory};
 use anyhow::Result;
+use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::process::Stdio;
@@ -6,8 +8,6 @@ use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command as TokioCommand;
 use tokio::sync::Mutex;
-use crate::db::{self, DbPool, TaskHistory};
-use chrono::Utc;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaskMessage {
@@ -29,15 +29,13 @@ pub fn create_task_registry() -> TaskRegistry {
 
 /// Spawns a script and returns stdout/stderr handles separately.
 /// The Child is wrapped for safe cancellation while streaming.
-pub async fn execute_script(
-    script_path: &str,
-) -> Result<tokio::process::Child> {
+pub async fn execute_script(script_path: &str) -> Result<tokio::process::Child> {
     let child = TokioCommand::new("sh")
         .arg(script_path)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()?;
-    
+
     Ok(child)
 }
 
@@ -48,7 +46,10 @@ pub async fn store_task(task_id: String, child: tokio::process::Child, registry:
 }
 
 /// Gets the task handle from registry (does not remove it)
-pub async fn get_task(task_id: &str, registry: &TaskRegistry) -> Option<Arc<Mutex<Option<tokio::process::Child>>>> {
+pub async fn get_task(
+    task_id: &str,
+    registry: &TaskRegistry,
+) -> Option<Arc<Mutex<Option<tokio::process::Child>>>> {
     let reg = registry.lock().await;
     reg.get(task_id).cloned()
 }
@@ -65,7 +66,7 @@ pub async fn cancel_task(task_id: &str, registry: &TaskRegistry) -> Result<bool>
         let reg = registry.lock().await;
         reg.get(task_id).cloned()
     };
-    
+
     if let Some(handle) = task_handle {
         let mut child_opt = handle.lock().await;
         if let Some(ref mut child) = *child_opt {
@@ -95,7 +96,7 @@ pub async fn run_script_task(
         exit_code: None,
         output: None,
     };
-    
+
     if let Err(e) = db::insert_task_history(&db, &task_history).await {
         tracing::error!("Failed to insert task history: {}", e);
         // We continue anyway
@@ -210,7 +211,11 @@ pub async fn run_script_task(
 
         // Update DB
         let finished_at = Utc::now().to_rfc3339();
-        let output_str = if output_buffer.is_empty() { None } else { Some(output_buffer.as_str()) };
+        let output_str = if output_buffer.is_empty() {
+            None
+        } else {
+            Some(output_buffer.as_str())
+        };
         let _ = db::update_task_history(&db, &task_id, &finished_at, exit_code, output_str).await;
 
         // Notify exit
@@ -226,6 +231,3 @@ pub async fn run_script_task(
 
     Ok(())
 }
-
-
-

@@ -2,7 +2,7 @@ use axum::{
     extract::{Path, State},
     http::StatusCode,
     response::Json,
-    routing::{get, post, put, delete},
+    routing::{delete, get, post, put},
     Router,
 };
 use serde::{Deserialize, Serialize};
@@ -53,7 +53,7 @@ async fn health() -> Json<serde_json::Value> {
 }
 
 async fn resources(
-    _auth: AuthUser,  // Require any authenticated user
+    _auth: AuthUser, // Require any authenticated user
     State(state): State<AppState>,
 ) -> Result<Json<SystemResources>, StatusCode> {
     let mut sys = state.sys.lock().await;
@@ -62,17 +62,17 @@ async fn resources(
 }
 
 async fn list_scripts(
-    _auth: AdminUser,  // Admin only
+    _auth: AdminUser, // Admin only
     State(state): State<AppState>,
 ) -> Result<Json<Vec<String>>, StatusCode> {
     let scripts_dir = db::get_setting(&state.db, "scripts_dir")
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .unwrap_or_else(|| "./scripts".to_string());
-    
+
     let dir = PathBuf::from(&scripts_dir);
     let mut scripts = Vec::new();
-    
+
     if let Ok(entries) = fs::read_dir(&dir) {
         for entry in entries.flatten() {
             if let Some(name) = entry.file_name().to_str() {
@@ -82,7 +82,7 @@ async fn list_scripts(
             }
         }
     }
-    
+
     Ok(Json(scripts))
 }
 
@@ -92,7 +92,7 @@ struct SettingsResponse {
 }
 
 async fn get_settings(
-    _auth: AdminUser,  // Admin only
+    _auth: AdminUser, // Admin only
     State(state): State<AppState>,
 ) -> Result<Json<SettingsResponse>, StatusCode> {
     let settings = db::get_all_settings(&state.db)
@@ -107,7 +107,7 @@ struct UpdateSettingRequest {
 }
 
 async fn update_setting(
-    _auth: AdminUser,  // Admin only
+    _auth: AdminUser, // Admin only
     State(state): State<AppState>,
     Path(key): Path<String>,
     Json(payload): Json<UpdateSettingRequest>,
@@ -119,7 +119,7 @@ async fn update_setting(
 }
 
 async fn get_history(
-    _auth: AuthUser,  // Any authenticated user
+    _auth: AuthUser, // Any authenticated user
     State(state): State<AppState>,
 ) -> Result<Json<Vec<TaskHistory>>, StatusCode> {
     let history = db::get_task_history(&state.db, 100)
@@ -129,7 +129,7 @@ async fn get_history(
 }
 
 async fn get_quick_actions(
-    _auth: AuthUser,  // Any authenticated user
+    _auth: AuthUser, // Any authenticated user
     State(state): State<AppState>,
 ) -> Result<Json<Vec<QuickAction>>, StatusCode> {
     let actions = db::get_quick_actions(&state.db)
@@ -147,7 +147,7 @@ struct CreateQuickActionRequest {
 }
 
 async fn create_quick_action(
-    _auth: AdminUser,  // Admin only
+    _auth: AdminUser, // Admin only
     State(state): State<AppState>,
     Json(payload): Json<CreateQuickActionRequest>,
 ) -> Result<Json<QuickAction>, StatusCode> {
@@ -159,11 +159,11 @@ async fn create_quick_action(
         icon: payload.icon,
         display_order: payload.display_order.unwrap_or(0),
     };
-    
+
     db::create_quick_action(&state.db, &action)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    
+
     Ok(Json(action))
 }
 
@@ -176,8 +176,10 @@ async fn execute_quick_action(
     let actions = db::get_quick_actions(&state.db)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    
-    let action = actions.into_iter().find(|a| a.id == id)
+
+    let action = actions
+        .into_iter()
+        .find(|a| a.id == id)
         .ok_or(StatusCode::NOT_FOUND)?;
 
     // 2. Prepare paths
@@ -185,7 +187,7 @@ async fn execute_quick_action(
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .unwrap_or_else(|| "./scripts".to_string());
-    
+
     let script_path = format!("{}/{}", scripts_dir, action.script_path);
     let task_id = uuid::Uuid::new_v4().to_string();
     let task_id_clone = task_id.clone();
@@ -193,8 +195,8 @@ async fn execute_quick_action(
     // 3. Run safely
     let db_clone = state.db.clone();
     // Use a transient registry since we don't support API-based cancellation yet
-    let registry = crate::services::executor::create_task_registry(); 
-    
+    let registry = crate::services::executor::create_task_registry();
+
     tokio::spawn(async move {
         let _ = crate::services::executor::run_script_task(
             script_path,
@@ -202,8 +204,9 @@ async fn execute_quick_action(
             action.script_path,
             db_clone,
             registry,
-            None // No real-time streaming to caller, just DB updates
-        ).await;
+            None, // No real-time streaming to caller, just DB updates
+        )
+        .await;
     });
 
     // 4. Return task_id so frontend can navigate/poll
@@ -211,7 +214,7 @@ async fn execute_quick_action(
 }
 
 async fn delete_quick_action(
-    _auth: AdminUser,  // Admin only
+    _auth: AdminUser, // Admin only
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<StatusCode, StatusCode> {
@@ -275,7 +278,7 @@ async fn create_user(
             Json(serde_json::json!({ "error": msg })),
         ));
     }
-    
+
     // Check if username already exists
     if let Ok(Some(_)) = db::get_user_by_username(&state.db, &payload.username).await {
         return Err((
@@ -283,13 +286,14 @@ async fn create_user(
             Json(serde_json::json!({ "error": "Username already exists" })),
         ));
     }
-    
-    let password_hash = hash_password(&payload.password)
-        .map_err(|_| (
+
+    let password_hash = hash_password(&payload.password).map_err(|_| {
+        (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(serde_json::json!({ "error": "Failed to hash password" })),
-        ))?;
-    
+        )
+    })?;
+
     let user = User {
         id: uuid::Uuid::new_v4().to_string(),
         username: payload.username,
@@ -299,14 +303,14 @@ async fn create_user(
         is_active: true,
         created_at: chrono::Utc::now().to_rfc3339(),
     };
-    
-    db::create_user(&state.db, &user)
-        .await
-        .map_err(|_| (
+
+    db::create_user(&state.db, &user).await.map_err(|_| {
+        (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(serde_json::json!({ "error": "Failed to create user" })),
-        ))?;
-    
+        )
+    })?;
+
     Ok(Json(UserResponse::from(user)))
 }
 
@@ -338,25 +342,25 @@ async fn update_user(
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .ok_or(StatusCode::NOT_FOUND)?;
-    
+
     let is_active = payload.is_active.unwrap_or(user.is_active);
-    
+
     // Handle display_name: None = keep existing, Some("") = clear, Some(value) = update
     let display_name = match &payload.display_name {
-        Some(name) if name.is_empty() => None,  // Empty string = clear
-        Some(name) => Some(name.as_str()),       // Non-empty = update
-        None => user.display_name.as_deref(),    // Not provided = keep existing
+        Some(name) if name.is_empty() => None, // Empty string = clear
+        Some(name) => Some(name.as_str()),     // Non-empty = update
+        None => user.display_name.as_deref(),  // Not provided = keep existing
     };
-    
+
     db::update_user(&state.db, &id, display_name, is_active)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    
+
     let updated_user = db::get_user_by_id(&state.db, &id)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .ok_or(StatusCode::NOT_FOUND)?;
-    
+
     Ok(Json(UserResponse::from(updated_user)))
 }
 
@@ -389,32 +393,37 @@ async fn reset_user_password(
             Json(serde_json::json!({ "error": msg })),
         ));
     }
-    
+
     // Verify user exists
     let _ = db::get_user_by_id(&state.db, &id)
         .await
-        .map_err(|_| (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({ "error": "Database error" })),
-        ))?
+        .map_err(|_| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": "Database error" })),
+            )
+        })?
         .ok_or((
             StatusCode::NOT_FOUND,
             Json(serde_json::json!({ "error": "User not found" })),
         ))?;
-    
-    let password_hash = hash_password(&payload.password)
-        .map_err(|_| (
+
+    let password_hash = hash_password(&payload.password).map_err(|_| {
+        (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(serde_json::json!({ "error": "Failed to hash password" })),
-        ))?;
-    
+        )
+    })?;
+
     db::update_user_password(&state.db, &id, &password_hash)
         .await
-        .map_err(|_| (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({ "error": "Failed to update password" })),
-        ))?;
-    
+        .map_err(|_| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": "Failed to update password" })),
+            )
+        })?;
+
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -436,29 +445,33 @@ async fn change_own_password(
             Json(serde_json::json!({ "error": msg })),
         ));
     }
-    
+
     // Admin users (from env) can't change password via this endpoint
     if auth.user_id.is_none() {
         return Err((
             StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({ "error": "Admin password is managed via environment variables" })),
+            Json(
+                serde_json::json!({ "error": "Admin password is managed via environment variables" }),
+            ),
         ));
     }
-    
+
     let user_id = auth.user_id.unwrap();
-    
+
     // Get current user and verify current password
     let user = db::get_user_by_id(&state.db, &user_id)
         .await
-        .map_err(|_| (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({ "error": "Database error" })),
-        ))?
+        .map_err(|_| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": "Database error" })),
+            )
+        })?
         .ok_or((
             StatusCode::NOT_FOUND,
             Json(serde_json::json!({ "error": "User not found" })),
         ))?;
-    
+
     // Verify current password
     if !crate::services::auth::verify_password(&payload.current_password, &user.password_hash) {
         return Err((
@@ -466,20 +479,23 @@ async fn change_own_password(
             Json(serde_json::json!({ "error": "Current password is incorrect" })),
         ));
     }
-    
+
     // Hash and save new password
-    let password_hash = hash_password(&payload.new_password)
-        .map_err(|_| (
+    let password_hash = hash_password(&payload.new_password).map_err(|_| {
+        (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(serde_json::json!({ "error": "Failed to hash password" })),
-        ))?;
-    
+        )
+    })?;
+
     db::update_user_password(&state.db, &user_id, &password_hash)
         .await
-        .map_err(|_| (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({ "error": "Failed to update password" })),
-        ))?;
-    
+        .map_err(|_| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": "Failed to update password" })),
+            )
+        })?;
+
     Ok(StatusCode::NO_CONTENT)
 }

@@ -35,26 +35,31 @@ pub async fn handle_websocket(
             return (StatusCode::UNAUTHORIZED, "Not authenticated").into_response();
         }
     };
-    
+
     let session = match validate_session(&state.db, &session_id).await {
         Some(s) => s,
         None => {
             return (StatusCode::UNAUTHORIZED, "Invalid or expired session").into_response();
         }
     };
-    
+
     let is_admin = session.user_role == UserRole::Admin;
     let session_id = session.id.clone();
-    
+
     ws.on_upgrade(move |socket| handle_socket(socket, state, session_id, is_admin))
 }
 
-async fn handle_socket(socket: axum::extract::ws::WebSocket, state: AppState, session_id: String, is_admin: bool) {
+async fn handle_socket(
+    socket: axum::extract::ws::WebSocket,
+    state: AppState,
+    session_id: String,
+    is_admin: bool,
+) {
     let (sender, mut receiver) = socket.split();
     let sender = Arc::new(Mutex::new(sender));
     let registry = executor::create_task_registry();
     let mut session_check_interval = tokio::time::interval(std::time::Duration::from_secs(300)); // 5 minutes
-    
+
     loop {
         tokio::select! {
              _ = session_check_interval.tick() => {
@@ -81,17 +86,17 @@ async fn handle_socket(socket: axum::extract::ws::WebSocket, state: AppState, se
                     Some(Err(_)) => break,
                     None => break,
                 };
-                
+
                 let text = match msg.to_text() {
                     Ok(text) => text,
                     Err(_) => continue,
                 };
-                
+
                 let client_msg: ClientMessage = match serde_json::from_str(text) {
                     Ok(msg) => msg,
                     Err(_) => continue,
                 };
-                
+
                 match client_msg.r#type.as_str() {
                     "run" => {
                         if let Some(script_name) = client_msg.script {
@@ -123,14 +128,14 @@ async fn handle_socket(socket: axum::extract::ws::WebSocket, state: AppState, se
                                 .await
                                 .unwrap_or_else(|_| Some("./scripts".to_string()))
                                 .unwrap_or_else(|| "./scripts".to_string());
-                            
+
                             let script_path = format!("{}/{}", scripts_dir, script_name);
                             let task_id = Uuid::new_v4().to_string();
 
                             // Create channel for streaming output back to WS
                             let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
                             let sender_clone = sender.clone();
-                            
+
                             // Bridge task: MPSC -> WebSocket
                             tokio::spawn(async move {
                                 while let Some(msg) = rx.recv().await {
@@ -141,7 +146,7 @@ async fn handle_socket(socket: axum::extract::ws::WebSocket, state: AppState, se
                                     }
                                 }
                             });
-                            
+
                             // Run the task (detached)
                             let _ = executor::run_script_task(
                                 script_path,
@@ -166,7 +171,7 @@ async fn handle_socket(socket: axum::extract::ws::WebSocket, state: AppState, se
                                 let _ = s.send(Message::Text(
                                     serde_json::to_string(&cancelled_msg).unwrap(),
                                 )).await;
-                                
+
                                 // Clean up registry
                                 executor::remove_task(&task_id, &registry).await;
                             }
@@ -178,4 +183,3 @@ async fn handle_socket(socket: axum::extract::ws::WebSocket, state: AppState, se
         }
     }
 }
-

@@ -30,6 +30,7 @@ pub struct PluginSupervisor {
     metadata_dir: PathBuf,
     sockets_dir: PathBuf,
     max_restarts: u32,
+    instance_id: String,
 }
 
 impl PluginSupervisor {
@@ -38,9 +39,11 @@ impl PluginSupervisor {
     /// # Arguments
     /// * `plugins_dir` - Directory containing plugin .binary files
     /// * `max_restarts` - Maximum restart attempts before disabling a plugin
+    /// * `instance_id` - Unique instance ID to pass to plugins
     pub fn new<P: AsRef<Path>>(
         plugins_dir: P,
         max_restarts: u32,
+        instance_id: String,
     ) -> Result<Self> {
         let plugins_dir = plugins_dir.as_ref().to_path_buf();
         let metadata_dir = plugins_dir.join(".metadata");
@@ -58,6 +61,7 @@ impl PluginSupervisor {
             metadata_dir,
             sockets_dir,
             max_restarts,
+            instance_id,
         })
     }
 
@@ -65,7 +69,9 @@ impl PluginSupervisor {
     ///
     /// # Returns
     /// HashMap mapping plugin_id to (binary_path, metadata)
-    pub async fn scan_plugins_directory(&self) -> Result<HashMap<String, (PathBuf, PluginMetadata)>> {
+    pub async fn scan_plugins_directory(
+        &self,
+    ) -> Result<HashMap<String, (PathBuf, PluginMetadata)>> {
         let mut discovered = HashMap::new();
 
         let entries = match fs::read_dir(&self.plugins_dir) {
@@ -147,8 +153,8 @@ impl PluginSupervisor {
         let stdout = String::from_utf8(output.stdout)
             .context("Plugin metadata output is not valid UTF-8")?;
 
-        let metadata: PluginMetadata = serde_json::from_str(&stdout)
-            .context("Failed to parse plugin metadata JSON")?;
+        let metadata: PluginMetadata =
+            serde_json::from_str(&stdout).context("Failed to parse plugin metadata JSON")?;
 
         Ok(metadata)
     }
@@ -205,7 +211,9 @@ impl PluginSupervisor {
     /// # Arguments
     /// * `plugin_id` - Plugin identifier to kill
     pub async fn kill_plugin(&mut self, plugin_id: &str) -> Result<()> {
-        let process = self.plugins.get_mut(plugin_id)
+        let process = self
+            .plugins
+            .get_mut(plugin_id)
             .context("Plugin not found")?;
 
         if let Some(mut child) = process.process.take() {
@@ -263,7 +271,10 @@ impl PluginSupervisor {
         // Check if socket file exists
         let socket_path = std::path::Path::new(&process.socket_path);
         if !socket_path.exists() {
-            debug!("Plugin {} socket not found: {:?}", plugin_id, process.socket_path);
+            debug!(
+                "Plugin {} socket not found: {:?}",
+                plugin_id, process.socket_path
+            );
             return false;
         }
 
@@ -312,7 +323,10 @@ impl PluginSupervisor {
     /// # Returns
     /// Current restart count
     pub fn increment_restart_count(&mut self, plugin_id: &str) -> u32 {
-        let count = self.restart_counts.entry(plugin_id.to_string()).or_insert(0);
+        let count = self
+            .restart_counts
+            .entry(plugin_id.to_string())
+            .or_insert(0);
         *count += 1;
         *count
     }
@@ -400,10 +414,8 @@ impl PluginSupervisor {
 
         config["plugins"][plugin_id] = serde_json::json!(enabled);
 
-        fs::write(
-            &config_path,
-            serde_json::to_string_pretty(&config)? + "\n",
-        ).context("Failed to write plugin config")?;
+        fs::write(&config_path, serde_json::to_string_pretty(&config)? + "\n")
+            .context("Failed to write plugin config")?;
 
         debug!("Plugin {} enabled state set to: {}", plugin_id, enabled);
         Ok(())
@@ -463,7 +475,10 @@ impl PluginSupervisor {
             }
         }
 
-        info!("Initialized {} plugins (spawned {} enabled plugins)", total_plugins, spawned_count);
+        info!(
+            "Initialized {} plugins (spawned {} enabled plugins)",
+            total_plugins, spawned_count
+        );
         Ok(spawned_count)
     }
 
@@ -474,7 +489,8 @@ impl PluginSupervisor {
     async fn send_init_message(&self, plugin_id: &str) -> Result<()> {
         use toru_plugin_api::LifecycleInitPayload;
 
-        let process = self.get_plugin_status(plugin_id)
+        let process = self
+            .get_plugin_status(plugin_id)
             .context("Plugin not found")?;
 
         // Wait for socket to be available (with timeout)
@@ -491,12 +507,13 @@ impl PluginSupervisor {
         }
 
         // Connect to plugin socket
-        let mut stream = UnixStream::connect(&process.socket_path).await
+        let mut stream = UnixStream::connect(&process.socket_path)
+            .await
             .context("Failed to connect to plugin socket")?;
 
-        // Create init message with instance_id (will be added in Phase 3)
+        // Create init message with instance_id
         let init_payload = LifecycleInitPayload {
-            instance_id: "placeholder".to_string(), // Will be replaced with actual instance_id in Phase 3
+            instance_id: self.instance_id.clone(),
             plugin_socket: process.socket_path.clone(),
             log_path: format!("/var/log/toru/plugins/{}.log", plugin_id),
         };
@@ -504,10 +521,11 @@ impl PluginSupervisor {
         let message = Message::new_lifecycle("init", Some(init_payload));
 
         // Serialize and send message
-        let json = serde_json::to_string(&message)
-            .context("Failed to serialize init message")?;
+        let json = serde_json::to_string(&message).context("Failed to serialize init message")?;
 
-        stream.write_all(json.as_bytes()).await
+        stream
+            .write_all(json.as_bytes())
+            .await
             .context("Failed to send init message")?;
 
         debug!("Sent init message to plugin {}", plugin_id);
@@ -519,28 +537,35 @@ impl PluginSupervisor {
     /// # Arguments
     /// * `plugin_id` - Plugin identifier
     async fn send_shutdown_message(&self, plugin_id: &str) -> Result<()> {
-        let process = self.get_plugin_status(plugin_id)
+        let process = self
+            .get_plugin_status(plugin_id)
             .context("Plugin not found")?;
 
         let socket_path = std::path::Path::new(&process.socket_path);
 
         if !socket_path.exists() {
-            debug!("Plugin {} socket not found, skipping shutdown message", plugin_id);
+            debug!(
+                "Plugin {} socket not found, skipping shutdown message",
+                plugin_id
+            );
             return Ok(());
         }
 
         // Connect to plugin socket
-        let mut stream = UnixStream::connect(&process.socket_path).await
+        let mut stream = UnixStream::connect(&process.socket_path)
+            .await
             .context("Failed to connect to plugin socket")?;
 
         // Create shutdown message
         let message = Message::new_lifecycle("shutdown", None);
 
         // Serialize and send message
-        let json = serde_json::to_string(&message)
-            .context("Failed to serialize shutdown message")?;
+        let json =
+            serde_json::to_string(&message).context("Failed to serialize shutdown message")?;
 
-        stream.write_all(json.as_bytes()).await
+        stream
+            .write_all(json.as_bytes())
+            .await
             .context("Failed to send shutdown message")?;
 
         debug!("Sent shutdown message to plugin {}", plugin_id);
@@ -565,13 +590,15 @@ impl PluginSupervisor {
         if self.should_disable_plugin(plugin_id) {
             error!(
                 "Plugin {} has reached max restarts ({}), disabling",
-                plugin_id,
-                self.max_restarts
+                plugin_id, self.max_restarts
             );
 
             // Log crash event
             // Note: Database access will be added when supervisor is integrated with AppState
-            warn!("Plugin {} disabled after {} crashes", plugin_id, restart_count);
+            warn!(
+                "Plugin {} disabled after {} crashes",
+                plugin_id, restart_count
+            );
 
             self.disable_plugin(plugin_id).await?;
 
@@ -582,19 +609,20 @@ impl PluginSupervisor {
         }
 
         // Calculate exponential backoff delay (1s, 2s, 4s, 8s, 16s)
-        let backoff_exponent = (restart_count as u32).min(4);
+        let backoff_exponent = restart_count.min(4);
         let delay_ms = 2u64.pow(backoff_exponent) * 1000; // 1000ms, 2000ms, 4000ms, 8000ms, 16000ms
 
         info!(
             "Restarting plugin {} (attempt #{}, waiting {}ms)",
-            plugin_id,
-            restart_count,
-            delay_ms
+            plugin_id, restart_count, delay_ms
         );
 
         // Log crash event
         // Note: Database access will be added when supervisor is integrated with AppState
-        warn!("Plugin {} crashed, restarting in {}ms (attempt #{})", plugin_id, delay_ms, restart_count);
+        warn!(
+            "Plugin {} crashed, restarting in {}ms (attempt #{})",
+            plugin_id, delay_ms, restart_count
+        );
 
         // Wait with exponential backoff
         tokio::time::sleep(tokio::time::Duration::from_millis(delay_ms)).await;
@@ -620,16 +648,19 @@ mod tests {
     #[tokio::test]
     async fn test_supervisor_creation() {
         let temp_dir = tempfile::tempdir().unwrap();
-        let supervisor = PluginSupervisor::new(temp_dir.path(), 10).unwrap();
+        let supervisor =
+            PluginSupervisor::new(temp_dir.path(), 10, "test-instance-id".to_string()).unwrap();
 
         assert_eq!(supervisor.max_restarts, 10);
+        assert_eq!(supervisor.instance_id, "test-instance-id");
         assert!(supervisor.plugins_dir.exists());
     }
 
     #[test]
     fn test_restart_counter() {
         let temp_dir = tempfile::tempdir().unwrap();
-        let mut supervisor = PluginSupervisor::new(temp_dir.path(), 10).unwrap();
+        let mut supervisor =
+            PluginSupervisor::new(temp_dir.path(), 10, "test-instance-id".to_string()).unwrap();
 
         assert_eq!(supervisor.get_restart_count("test"), 0);
         assert_eq!(supervisor.increment_restart_count("test"), 1);
@@ -643,7 +674,8 @@ mod tests {
     #[test]
     fn test_should_disable() {
         let temp_dir = tempfile::tempdir().unwrap();
-        let supervisor = PluginSupervisor::new(temp_dir.path(), 3).unwrap();
+        let mut supervisor =
+            PluginSupervisor::new(temp_dir.path(), 3, "test-instance-id".to_string()).unwrap();
 
         assert!(!supervisor.should_disable_plugin("test"));
 

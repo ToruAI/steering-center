@@ -1,6 +1,6 @@
 # Tasks: Add Process-Isolated Plugin System
 
-**Progress:** 41/172 tasks completed
+**Progress:** 45/172 tasks completed
 
 ## Phase 1: Plugin Protocol & Rust SDK
 
@@ -59,11 +59,13 @@
 
 ## Phase 3: Instance Identity
 
+**Status:** ✅ Complete (2025-12-30)
+
 ### 3.1 Instance ID
-- [ ] 3.1.1 Add `get_or_create_instance_id()` function in db.rs
-- [ ] 3.1.2 Generate UUID v4 on first run
-- [ ] 3.1.3 Store instance_id in settings table
-- [ ] 3.1.4 Pass instance_id to plugins via init message
+- [x] 3.1.1 Add `get_or_create_instance_id()` function in db.rs
+- [x] 3.1.2 Generate UUID v4 on first run
+- [x] 3.1.3 Store instance_id in settings table
+- [x] 3.1.4 Pass instance_id to plugins via init message
 
 ## Phase 4: Plugin Key-Value Storage
 
@@ -96,7 +98,9 @@
 - [x] Cleanup runs on startup and every 24 hours
 
 **Build Status:** ✅ Compiles successfully (cargo check passes)
-**Warnings:** 9 unused function warnings (expected - integration pending in Phase 5+)
+**Warnings:** 11 unused function warnings (expected - integration pending in Phase 5+)
+
+**Note:** Phase 3 instance_id function (`get_or_create_instance_id`) is implemented and ready for integration in Phase 5. Clippy warnings about dead_code are expected and will resolve when PluginSupervisor is initialized in main.rs.
 
 ## Phase 5: Plugin API Routes
 

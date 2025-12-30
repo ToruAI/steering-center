@@ -245,6 +245,31 @@ pub async fn get_all_settings(pool: &DbPool) -> Result<Vec<Setting>> {
     Ok(settings)
 }
 
+/// Get or create the instance ID (UUID v4)
+///
+/// On first run, generates a new UUID v4 and stores it in the settings table.
+/// On subsequent runs, returns the existing instance ID from the settings table.
+///
+/// # Arguments
+/// * `pool` - Database connection pool
+///
+/// # Returns
+/// The instance ID as a String
+pub async fn get_or_create_instance_id(pool: &DbPool) -> Result<String> {
+    // Try to get existing instance_id
+    if let Some(existing_id) = get_setting(pool, "instance_id").await? {
+        return Ok(existing_id);
+    }
+
+    // Generate new UUID v4
+    let new_id = uuid::Uuid::new_v4().to_string();
+
+    // Store in settings table
+    set_setting(pool, "instance_id", &new_id).await?;
+
+    Ok(new_id)
+}
+
 pub async fn insert_task_history(pool: &DbPool, task: &TaskHistory) -> Result<()> {
     let conn = pool.lock().await;
     conn.execute(

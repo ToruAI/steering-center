@@ -7,6 +7,8 @@ import { SystemMonitor } from './pages/SystemMonitor';
 import { Scripts } from './pages/Scripts';
 import { History } from './pages/History';
 import { Settings } from './pages/Settings';
+import { Plugins } from './pages/Plugins';
+import { PluginView } from './pages/PluginView';
 import { Login } from './pages/Login';
 import { TooltipProvider } from '@/components/ui/tooltip';
 
@@ -58,6 +60,23 @@ function App() {
                     <Settings />
                   </ProtectedRoute>
                 } 
+              />
+              <Route 
+                path="/plugins" 
+                element={
+                  <ProtectedRoute requireAdmin>
+                    <Plugins />
+                  </ProtectedRoute>
+                } 
+              />
+              {/* Dynamic plugin routes - /plugin/:pluginId */}
+              <Route
+                path="/plugin/:pluginId"
+                element={
+                  <ProtectedRoute>
+                    <PluginView />
+                  </ProtectedRoute>
+                }
               />
             </Route>
             

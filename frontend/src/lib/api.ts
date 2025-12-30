@@ -111,6 +111,46 @@ export interface Setting {
   value: string;
 }
 
+export interface PluginMetadata {
+  id: string;
+  name: string;
+  version: string;
+  author: string;
+  icon: string | null;
+  route: string | null;
+}
+
+export interface PluginStatus {
+  metadata: PluginMetadata;
+  enabled: boolean;
+  running: boolean;
+  health: 'healthy' | 'unhealthy' | 'disabled';
+  pid: number | null;
+  socket_path: string | null;
+}
+
+export interface Plugin {
+  id: string;
+  name: string;
+  version: string;
+  author: string;
+  icon: string | null;
+  route: string | null;
+  enabled: boolean;
+  running: boolean;
+  health: 'healthy' | 'unhealthy' | 'disabled';
+  pid: number | null;
+  socket_path: string | null;
+}
+
+export interface PluginLogEntry {
+  timestamp: string;
+  level: string;
+  plugin: string;
+  message: string;
+  error?: string;
+}
+
 async function handleResponse<T>(res: Response, endpoint: string): Promise<T> {
   if (!res.ok) {
     const errorText = await res.text().catch(() => 'Unknown error');
@@ -296,5 +336,31 @@ export const api = {
   deleteQuickAction: async (id: string): Promise<void> => {
     const res = await request(`/quick-actions/${id}`, { method: 'DELETE' });
     await handleAuthResponse(res, `/quick-actions/${id}`);
+  },
+
+  // Plugin management (Admin only)
+  listPlugins: async (): Promise<Plugin[]> => {
+    const res = await request('/plugins');
+    return handleAuthResponse(res, '/plugins');
+  },
+
+  getPlugin: async (id: string): Promise<Plugin> => {
+    const res = await request(`/plugins/${id}`);
+    return handleAuthResponse(res, `/plugins/${id}`);
+  },
+
+  enablePlugin: async (id: string): Promise<void> => {
+    const res = await request(`/plugins/${id}/enable`, { method: 'POST' });
+    await handleAuthResponse(res, `/plugins/${id}/enable`);
+  },
+
+  disablePlugin: async (id: string): Promise<void> => {
+    const res = await request(`/plugins/${id}/disable`, { method: 'POST' });
+    await handleAuthResponse(res, `/plugins/${id}/disable`);
+  },
+
+  getPluginLogs: async (id: string): Promise<PluginLogEntry[]> => {
+    const res = await request(`/plugins/${id}/logs`);
+    return handleAuthResponse(res, `/plugins/${id}/logs`);
   },
 };

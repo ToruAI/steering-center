@@ -1,6 +1,6 @@
 # Tasks: Add Process-Isolated Plugin System
 
-**Progress:** 66/172 tasks completed (Phase 5: 10/12 done, 1 deferred, 1 blocked)
+**Progress:** 92/172 tasks completed (Phase 6: ✅ Complete, Phase 5: 10/12 done, 1 deferred, 1 blocked)
 
 ## Phase 1: Plugin Protocol & Rust SDK
 
@@ -140,30 +140,32 @@ These tests should be run after Phase 8 (Example Plugins) is complete, when we h
 
 ## Phase 6: Frontend - Plugin Manager
 
+**Status:** ✅ Complete (2025-12-30)
+
 ### 6.1 Plugin List Page
-- [ ] 6.1.1 Create `frontend/src/pages/Plugins.tsx`
-- [ ] 6.1.2 Add API client functions in `lib/api.ts`
-- [ ] 6.1.3 Display plugin cards (name, version, status, icon, health)
-- [ ] 6.1.4 Implement enable/disable toggle
-- [ ] 6.1.5 Show plugin details on click
-- [ ] 6.1.6 Show plugin logs in modal/sidebar
-- [ ] 6.1.7 Add route to App.tsx
-- [ ] 6.1.8 Add "Plugins" entry to sidebar
+- [x] 6.1.1 Create `frontend/src/pages/Plugins.tsx`
+- [x] 6.1.2 Add API client functions in `lib/api.ts`
+- [x] 6.1.3 Display plugin cards (name, version, status, icon, health)
+- [x] 6.1.4 Implement enable/disable toggle
+- [x] 6.1.5 Show plugin details on click
+- [x] 6.1.6 Show plugin logs in modal/sidebar
+- [x] 6.1.7 Add route to App.tsx
+- [x] 6.1.8 Add "Plugins" entry to sidebar
 
 ### 6.2 Plugin View Container
-- [ ] 6.2.1 Create `frontend/src/pages/PluginView.tsx`
-- [ ] 6.2.2 Load plugin bundle.js dynamically
-- [ ] 6.2.3 Call `mount(container, api)` after load
-- [ ] 6.2.4 Call `unmount(container)` on navigation away
-- [ ] 6.2.5 Provide API object with fetch, navigate, showToast
-- [ ] 6.2.6 Add dynamic routes for enabled plugins
+- [x] 6.2.1 Create `frontend/src/pages/PluginView.tsx`
+- [x] 6.2.2 Load plugin bundle.js dynamically
+- [x] 6.2.3 Call `mount(container, api)` after load
+- [x] 6.2.4 Call `unmount(container)` on navigation away
+- [x] 6.2.5 Provide API object with fetch, navigate, showToast
+- [x] 6.2.6 Add dynamic routes for enabled plugins
 
 ### 6.3 Sidebar Integration
-- [ ] 6.3.1 Fetch enabled plugins on app load
-- [ ] 6.3.2 Add plugin entries to sidebar below system items
-- [ ] 6.3.3 Use plugin icon and name from metadata
-- [ ] 6.3.4 Hide plugins section when no plugins enabled
-- [ ] 6.3.5 Show health indicator (green/red dot) for each plugin
+- [x] 6.3.1 Fetch enabled plugins on app load
+- [x] 6.3.2 Add plugin entries to sidebar below system items
+- [x] 6.3.3 Use plugin icon and name from metadata
+- [x] 6.3.4 Hide plugins section when no plugins enabled
+- [x] 6.3.5 Show health indicator (green/red dot) for each plugin
 
 ## Phase 7: Logging & Observability
 

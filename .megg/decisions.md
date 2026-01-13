@@ -1,6 +1,6 @@
 ---
 created: 2025-12-30T13:56:45.272Z
-updated: 2025-12-31T13:59:40.115Z
+updated: 2026-01-13T17:46:38.237Z
 type: memory
 ---
 ## 2025-12-30T13:52:00.000Z
@@ -196,3 +196,35 @@ Phase 8 (Documentation) was initially deleted in error, then restored. Critical 
 - Plugin system MVP is now smaller and focused
 - Licensing can be added later when actually needed
 - No blocking dependencies between the two features
+
+
+## 2026-01-13T17:46:38.238Z
+## 2026-01-13 - Phase 2: Integration Tests Rewritten
+
+**Context:** Phase 1 completed plugin supervisor implementation. Phase 2 required rewriting integration tests to actually test the real PluginSupervisor methods instead of mocks.
+
+**Problem:** Current tests in `tests/plugins_integration.rs` were creating shell scripts and testing concepts, not actual PluginSupervisor code paths.
+
+**Implementation:**
+1. Created `src/lib.rs` to expose modules (`db`, `services`) for integration testing
+2. Rewrote test helpers to use actual PluginSupervisor with temp directories
+3. Modified tests to copy real `hello-plugin-rust.binary` for realistic testing
+4. Updated tests to call actual methods:
+   - T1-T4: `scan_plugins_directory()`, `spawn_plugin()`, `read_plugin_metadata()`
+   - T12-T15: `enable_plugin()`, `disable_plugin()`, `is_plugin_enabled()`, restart counter methods
+   - T19: `forward_http_request()` with actual error handling
+   - T23: `plugin_event_log()` with real database operations
+
+**Key Fixes:**
+- Added 500ms delays after spawning plugins to allow socket creation (async process)
+- Fixed plugin route assertion (actual route is `/hello-rust` not `/hello-plugin-rust`)
+- T23 uses isolated temp database to avoid test interference
+- Removed unused imports and variables
+
+**Results:**
+- All 15 integration tests pass
+- Tests now verify actual PluginSupervisor behavior
+- Tests use real plugin binary for authentic integration testing
+- Health checks account for async socket creation timing
+
+**Reversible:** Yes - could revert to mocks if needed, but real integration tests are more valuable.

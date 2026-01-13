@@ -196,24 +196,27 @@ async fn main() {
                                     }
                                 }
                                 toru_plugin_api::MessagePayload::Kv { request_id, payload } => {
-                                    match plugin.handle_kv(payload.clone()).await {
-                                        Ok(value) => {
-                                            let kv_resp = KvMessageResponse { value };
-                                            let response_msg = Message::new_http(
-                                                request_id.clone(),
-                                                toru_plugin_api::types::HttpRequest {
-                                                    method: "GET".to_string(),
-                                                    path: "".to_string(),
-                                                    headers: HashMap::new(),
-                                                    body: Some(serde_json::to_string(&kv_resp).unwrap()),
-                                                },
-                                            );
-                                            if let Err(e) = protocol.write_message(&mut stream, &response_msg).await {
-                                                eprintln!("[HelloPlugin] Failed to write KV response: {}", e);
+                                    // Extract KvOp from the payload
+                                    if let toru_plugin_api::KvMessagePayload::Request(kv_op) = payload {
+                                        match plugin.handle_kv(kv_op.clone()).await {
+                                            Ok(value) => {
+                                                let kv_resp = KvMessageResponse { value };
+                                                let response_msg = Message::new_http(
+                                                    request_id.clone(),
+                                                    toru_plugin_api::types::HttpRequest {
+                                                        method: "GET".to_string(),
+                                                        path: "".to_string(),
+                                                        headers: HashMap::new(),
+                                                        body: Some(serde_json::to_string(&kv_resp).unwrap()),
+                                                    },
+                                                );
+                                                if let Err(e) = protocol.write_message(&mut stream, &response_msg).await {
+                                                    eprintln!("[HelloPlugin] Failed to write KV response: {}", e);
+                                                }
                                             }
-                                        }
-                                        Err(e) => {
-                                            eprintln!("[HelloPlugin] Error handling KV: {}", e);
+                                            Err(e) => {
+                                                eprintln!("[HelloPlugin] Error handling KV: {}", e);
+                                            }
                                         }
                                     }
                                 }

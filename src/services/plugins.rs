@@ -597,6 +597,16 @@ impl PluginSupervisor {
             }
         }
 
+        // Wait for socket to be ready after spawning (similar to send_init_message retry logic)
+        let socket_path = self.sockets_dir.join(format!("{}.sock", plugin_id));
+        for _ in 0..20 {
+            // 20 retries * 100ms = 2 seconds max
+            if socket_path.exists() {
+                break;
+            }
+            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+        }
+
         info!("Plugin {} enabled", plugin_id);
 
         // Notify plugin event via notification hooks

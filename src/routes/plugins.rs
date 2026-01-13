@@ -83,7 +83,8 @@ pub fn create_plugin_router() -> Router<AppState> {
         .route("/:id/enable", post(enable_plugin))
         .route("/:id/disable", post(disable_plugin))
         .route("/:id/bundle.js", get(get_plugin_bundle))
-        .route("/:id/logs", get(get_plugin_logs));
+        .route("/:id/logs", get(get_plugin_logs))
+        .route("/:id/kv", post(plugin_kv_handler));
 
     // Dynamic plugin routes (separate path prefix to avoid conflicts)
     // Plugins declare a route in metadata (e.g., "/hello-plugin")
@@ -404,4 +405,77 @@ struct LogsResponse {
     logs: Vec<crate::services::logging::LogEntry>,
     page: usize,
     page_size: usize,
+}
+
+/// KV operation request
+#[derive(Deserialize)]
+struct KvOperation {
+    action: String, // "get", "set", "delete"
+    key: String,
+    value: Option<String>,
+}
+
+/// KV operation response
+#[derive(Serialize)]
+struct KvResponse {
+    value: Option<String>,
+}
+
+/// Handle KV storage operations for plugins
+async fn plugin_kv_handler(
+    _auth: AuthUser,
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(op): Json<KvOperation>,
+) -> Result<Json<KvResponse>, (StatusCode, Json<serde_json::Value>)> {
+    // Validate action
+    match op.action.as_str() {
+        "get" => {
+            // Get value from database
+            let value = crate::db::plugin_kv_get(&state.db, &id, &op.key)
+                .await
+                .map_err(|e| {
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(serde_json::json!({ "error": format!("Failed to get KV: {}", e) })),
+                    )
+                })?;
+            Ok(Json(KvResponse { value }))
+        }
+        "set" => {
+            // Set value in database
+            let value = op.value.ok_or((
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({ "error": "Missing 'value' field for set operation" })),
+            ))?;
+
+            crate::db::plugin_kv_set(&state.db, &id, &op.key, &value)
+                .await
+                .map_err(|e| {
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(serde_json::json!({ "error": format!("Failed to set KV: {}", e) })),
+                    )
+                })?;
+
+            Ok(Json(KvResponse { value: Some(value) }))
+        }
+        "delete" => {
+            // Delete value from database
+            crate::db::plugin_kv_delete(&state.db, &id, &op.key)
+                .await
+                .map_err(|e| {
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(serde_json::json!({ "error": format!("Failed to delete KV: {}", e) })),
+                    )
+                })?;
+
+            Ok(Json(KvResponse { value: None }))
+        }
+        _ => Err((
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": format!("Invalid action: {}", op.action) })),
+        )),
+    }
 }

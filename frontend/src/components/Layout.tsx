@@ -1,10 +1,11 @@
 import { Link, useLocation, Outlet } from 'react-router-dom';
-import { Home, Terminal, Settings, Activity, History, LogOut, User, Menu } from 'lucide-react';
+import { Home, Terminal, Settings, Activity, History, LogOut, User, Menu, Plug2 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { Separator } from '@/components/ui/separator';
 import { ToruLogo } from './ToruLogo';
 import { useAuth } from '../contexts/AuthContext';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import {
   Sheet,
   SheetContent,
@@ -12,18 +13,39 @@ import {
   SheetTitle,
   SheetTrigger,
 } from '@/components/ui/sheet';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { api } from '../lib/api';
+import type { Plugin } from '../lib/api';
 
 export function Layout() {
   const location = useLocation();
   const { user, logout, isAdmin } = useAuth();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [enabledPlugins, setEnabledPlugins] = useState<Plugin[]>([]);
+
+  // Fetch enabled plugins on mount (all authenticated users can see plugins)
+  useEffect(() => {
+    const fetchPlugins = async () => {
+      if (!user) return; // Only fetch if authenticated
+      try {
+        const plugins = await api.listPlugins();
+        // Filter for enabled and running plugins
+        const activePlugins = plugins.filter(p => p.enabled && p.running);
+        setEnabledPlugins(activePlugins);
+      } catch (err) {
+        console.error('Failed to fetch plugins:', err);
+      }
+    };
+
+    fetchPlugins();
+  }, [user]);
 
   const allNavItems = [
     { path: '/', icon: Home, label: 'Dashboard', public: true },
     { path: '/system-monitor', icon: Activity, label: 'System Monitor', public: true },
     { path: '/scripts', icon: Terminal, label: 'Scripts', adminOnly: true },
     { path: '/history', icon: History, label: 'History', public: true },
+    { path: '/plugins', icon: Plug2, label: 'Plugins', adminOnly: true },
     { path: '/settings', icon: Settings, label: 'Settings', public: true },
   ];
 
@@ -86,8 +108,48 @@ export function Layout() {
                       </Link>
                     );
                   })}
+
+                  {/* Enabled Plugins Section */}
+                  {enabledPlugins.length > 0 && (
+                    <>
+                      <Separator className="my-2" />
+                      <p className="px-3 py-2 text-xs font-semibold text-muted-foreground">Plugins</p>
+                      {enabledPlugins.map((plugin) => {
+                        const isActive = location.pathname === `/plugin/${plugin.id}`;
+                        return (
+                          <Link
+                            key={plugin.id}
+                            to={`/plugin/${plugin.id}`}
+                            onClick={handleMobileNavClick}
+                            className={cn(
+                              'group flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-all',
+                              isActive
+                                ? 'bg-primary text-primary-foreground'
+                                : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
+                            )}
+                          >
+                            {plugin.icon ? (
+                              <span className="h-5 w-5 flex items-center justify-center">
+                                {plugin.icon}
+                              </span>
+                            ) : (
+                              <Plug2 className="h-5 w-5" />
+                            )}
+                            <span className="flex-1 truncate">{plugin.name}</span>
+                            <Badge
+                              variant={plugin.health === 'healthy' ? 'default' : 'destructive'}
+                              className={cn(
+                                'h-2 w-2 rounded-full p-0',
+                                plugin.health === 'healthy' ? 'bg-green-500' : 'bg-red-500'
+                              )}
+                            />
+                          </Link>
+                        );
+                      })}
+                    </>
+                  )}
                 </nav>
-                
+
                 <Separator className="my-4" />
                 
                 {/* Logout */}
@@ -136,6 +198,47 @@ export function Layout() {
                 </Link>
               );
             })}
+
+            {/* Enabled Plugins Section */}
+            {enabledPlugins.length > 0 && (
+              <>
+                <Separator className="my-2" />
+                <div className="px-3 py-2">
+                  <p className="text-xs font-semibold text-muted-foreground mb-2">Plugins</p>
+                  {enabledPlugins.map((plugin) => {
+                    const isActive = location.pathname === `/plugin/${plugin.id}`;
+                    return (
+                      <Link
+                        key={plugin.id}
+                        to={`/plugin/${plugin.id}`}
+                        className={cn(
+                          'group flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-all',
+                          isActive
+                            ? 'bg-primary text-primary-foreground shadow-sm'
+                            : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
+                        )}
+                      >
+                        {plugin.icon ? (
+                          <span className="h-5 w-5 flex items-center justify-center">
+                            {plugin.icon}
+                          </span>
+                        ) : (
+                          <Plug2 className="h-5 w-5" />
+                        )}
+                        <span className="flex-1 truncate">{plugin.name}</span>
+                        <Badge
+                          variant={plugin.health === 'healthy' ? 'default' : 'destructive'}
+                          className={cn(
+                            'h-2 w-2 rounded-full p-0',
+                            plugin.health === 'healthy' ? 'bg-green-500' : 'bg-red-500'
+                          )}
+                        />
+                      </Link>
+                    );
+                  })}
+                </div>
+              </>
+            )}
           </nav>
 
           {/* User Footer */}

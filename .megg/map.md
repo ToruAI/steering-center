@@ -1,10 +1,11 @@
 # Memory Map
 
-Auto-generated. Last updated: 2025-12-29T13:39:21.531Z
+Auto-generated. Last updated: 2026-01-13T21:30:34.170Z
 
 ## Structure
 
 - `.megg/`
   - `frontend/.megg/`
+      - `openspec/changes/add-dynamic-plugin-system/.megg/`
   - `src/.megg/`
 

@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use sysinfo::{System, Disks, Networks};
+use sysinfo::{Disks, Networks, System};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CpuCore {
@@ -47,7 +47,7 @@ pub fn get_system_resources(sys: &mut System) -> SystemResources {
     sys.refresh_cpu_usage();
     sys.refresh_memory();
     sys.refresh_processes();
-    
+
     // Get per-core CPU usage
     let cpus = sys.cpus();
     let cpu_cores: Vec<CpuCore> = cpus
@@ -58,14 +58,14 @@ pub fn get_system_resources(sys: &mut System) -> SystemResources {
             usage: cpu.cpu_usage(),
         })
         .collect();
-    
+
     // Calculate average CPU usage
     let cpu_percent = if !cpus.is_empty() {
         cpus.iter().map(|c| c.cpu_usage()).sum::<f32>() / cpus.len() as f32
     } else {
         0.0
     };
-    
+
     // Memory info
     let memory_total = sys.total_memory();
     let memory_used = sys.used_memory();
@@ -74,10 +74,10 @@ pub fn get_system_resources(sys: &mut System) -> SystemResources {
     } else {
         0.0
     };
-    
+
     let swap_total = sys.total_swap();
     let swap_used = sys.used_swap();
-    
+
     // Disk info
     let disks = Disks::new_with_refreshed_list();
     let disk_info: Vec<DiskInfo> = disks
@@ -91,7 +91,7 @@ pub fn get_system_resources(sys: &mut System) -> SystemResources {
             } else {
                 0.0
             };
-            
+
             DiskInfo {
                 name: disk.name().to_string_lossy().to_string(),
                 mount_point: disk.mount_point().to_string_lossy().to_string(),
@@ -102,7 +102,7 @@ pub fn get_system_resources(sys: &mut System) -> SystemResources {
             }
         })
         .collect();
-    
+
     // Network info
     let networks = Networks::new_with_refreshed_list();
     let network_info: Vec<NetworkInterface> = networks
@@ -113,10 +113,10 @@ pub fn get_system_resources(sys: &mut System) -> SystemResources {
             transmitted: data.total_transmitted(),
         })
         .collect();
-    
+
     let uptime_seconds = System::uptime();
     let process_count = sys.processes().len();
-    
+
     SystemResources {
         cpu_percent,
         cpu_cores,

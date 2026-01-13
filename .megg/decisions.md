@@ -1,134 +1,313 @@
 ---
-created: 2025-12-15T09:58:30.000Z
-updated: 2025-12-16T10:40:37.514Z
+created: 2025-12-30T13:56:45.272Z
+updated: 2026-01-13T19:15:16.357Z
 type: memory
 ---
-# Architectural Decisions
+## 2025-12-30T13:52:00.000Z
+## Phase 1: Plugin Protocol & Rust SDK - COMPLETED (2025-12-30)
 
-## 2024-12-15: Frontend Asset Embedding
+**What was implemented:**
 
-### Context
-The project goal is a single deployable binary. Initial implementation used `ServeDir::new("frontend/dist")` which looks for files at runtime relative to the current working directory.
+### toru-plugin-api Crate (1.1)
+- Created `toru-plugin-api/Cargo.toml` with minimal dependencies (serde, tokio, async-trait, uuid, chrono, thiserror)
+- Defined `ToruPlugin` trait with methods: metadata(), init(), handle_http(), handle_kv()
+- Defined `PluginMetadata` struct (id, name, version, author, icon, route)
+- Defined `PluginContext` struct (instance_id, config, kv)
+- Defined `HttpRequest` and `HttpResponse` structs
+- Defined `KvOp` enum (Get, Set, Delete)
+- Defined `PluginError` enum with comprehensive error types
+- Defined message types (Lifecycle, Http, Kv)
+- Implemented message serialization/deserialization (JSON)
+- Added comprehensive README with examples
 
-### Problem
-When the binary is moved or run from a different location (e.g., `./target/release/steering-center`), it can't find `frontend/dist/` and serves a blank white page. The build script masked this by always running from project root.
+### Plugin Protocol (1.2)
+- Defined JSON message format (type, timestamp, request_id, payload)
+- Implemented `PluginProtocol::read_message()` - reads from Unix socket, deserializes JSON
+- Implemented `PluginProtocol::write_message()` - serializes JSON, writes to Unix socket
+- Documented message types and payload structures
+- Created protocol examples in README (init, http request, kv get/set)
 
-### Decision
-Use `rust-embed` to embed frontend assets into the binary at compile time.
+### Key Data Structures
+- `Message` - Protocol message with type, timestamp, request_id, payload
+- `MessagePayload` - Enum variant for Lifecycle, Http, Kv messages
+- `LifecycleInitPayload` - Init message with instance_id, plugin_socket, log_path
+- `PluginKvStore` - Async trait for plugin KV operations (get, set, delete)
+- `PluginProtocol` - Struct for socket communication with read/write methods
 
-### Consequences
-- **Build order matters**: Frontend must be built BEFORE `cargo build` since assets are embedded at compile time
-- **Binary size increases**: All frontend assets are bundled into the executable
-- **True portability**: Binary can be copied anywhere and run without external dependencies (except SQLite db file)
-- **Development workflow changes**: Need to rebuild Rust after frontend changes to see updates in release binary
+### File Structure Created
+```
+toru-plugin-api/
+├── Cargo.toml
+├── README.md
+└── src/
+    ├── lib.rs          # Main exports, ToruPlugin trait
+    ├── error.rs        # PluginError, PluginResult type alias
+    ├── message.rs      # Message exports
+    ├── protocol.rs     # PluginProtocol for socket communication
+    └── types.rs        # All data structures
+```
 
-### Alternatives Considered
-1. **Require specific working directory** - Rejected: fragile, bad UX
-2. **Config file for asset path** - Rejected: adds deployment complexity, defeats "single binary" goal
-3. **Embed assets with `include_dir!`** - Viable but `rust-embed` has better ergonomics and mime type handling
+### Build Status
+- ✅ Compiles successfully (`cargo build -p toru-plugin-api` passes)
+- ✅ Workspace integration added to root Cargo.toml
+- ✅ No clippy warnings
 
-### Status
-Implementing `rust-embed` solution.
+**What this enables for later phases:**
+- Phase 2 can now implement plugin supervision with known protocol
+- Phase 4 task 4.2.5 (SqliteKvStore) is now unblocked
+- Plugin developers can use the SDK to build Rust plugins
 
-## 2025-12-15T10:20:05.902Z
+**Next phases:**
+- Phase 2: Plugin Supervisor (process management, lifecycle, crash recovery)
+- Phase 3: Instance Identity (UUID generation, persistence)
+- Phase 5: Plugin API Routes (backend routes, integration with supervisor)
 
-## 2024-12-15: v0.1.0 Release Fixes
-
-### Task Cancellation Architecture
-
-**Problem**: Original design stored child process in registry, then immediately removed it to get stdout/stderr handles. This meant cancellation couldn't find the process.
-
-**Solution**: Changed `TaskRegistry` from `HashMap<String, Child>` to `HashMap<String, Arc<Mutex<Option<Child>>>>`. Now:
-- Take stdout/stderr handles BEFORE storing in registry
-- Child stays in registry during execution
-- Cancellation can find and kill the process
-- Clean up registry after task completes
-
-**Pattern**: When you need both streaming access AND cancellation, separate the I/O handles from the process handle early.
-
-### Server Binding Security
-
-**Decision**: Default to `127.0.0.1` (localhost only), not `0.0.0.0`.
-
-**Rationale**: The design doc explicitly states "localhost only, Cloudflare handles external traffic". Binding to all interfaces by default is a security risk for a tool that executes shell scripts.
-
-**Override**: `STEERING_HOST=0.0.0.0` for users who need external access.
-
-### Quick Actions UX
-
-**Decision**: Quick Actions navigate to Scripts page with script pre-selected rather than executing inline on Dashboard.
-
-**Rationale**: 
-- Keeps terminal output in one place (Scripts page)
-- User sees what's about to run before execution
-- Simpler implementation, consistent UX
-- Dashboard stays clean (overview, not execution)
-
-### History Page
-
-**Added**: `/history` route showing last 100 executions with:
-- Expandable output view
-- Status badges (Running/Success/Failed)
-- Re-run button per task
-- Task ID and timestamps
-
-**Note**: Output is stored in SQLite. For long-running scripts with lots of output, this could grow the DB. Consider adding output truncation or retention policy in future versions.
-
-## 2025-12-16: Hybrid Authentication Implementation
-
-### Context
-User requested a simple authentication system with two roles: Admin (owner) and Client (viewer).
-
-### Decision
-Implemented a hybrid approach:
-- **Admin**: Authenticated via environment variables (`ADMIN_USERNAME`/`ADMIN_PASSWORD`). No database record for admin credentials to prevent lockout and maintain simplicity.
-- **Clients**: Authenticated via SQLite `users` table. Managed by Admin via UI.
-- **Session**: Expirable SQLite-backed sessions with HttpOnly cookies.
-
-### Consequences
-- **Security**: Improved. Dashboard is no longer public on localhost.
-- **UX**: Admin can now safely create restricted "view-only" accounts for clients.
-- **Complexity**: Added `argon2` dependency and auth middleware.
+**References:**
+- See `toru-plugin-api/README.md` for usage examples
+- See `openspec/changes/add-dynamic-plugin-system/design.md` for protocol specification
+- See `openspec/changes/add-dynamic-plugin-system/specs/plugins/spec.md` for requirements
 
 
-## 2025-12-16T10:40:37.514Z
-## 2025-12-16: Authentication Security Hardening
+## 2025-12-30T14:24:42.158Z
+## Phase 2: Plugin Supervisor - Progress (2025-12-30)
 
-### Context
-Code review identified several security issues in the initial auth implementation.
+### Completed
+- **Phase 2.1 (Process Management)**: All 9 tasks complete
+  - Created `src/services/plugins.rs` with PluginSupervisor struct
+  - Implemented PluginProcess struct with ID, process, socket, enabled, pid, metadata
+  - scan_plugins_directory() - finds .binary files
+  - read_plugin_metadata() - calls --metadata flag
+  - spawn_plugin() - starts plugin process
+  - kill_plugin() - stops plugin gracefully with shutdown message
+  - check_plugin_health() - checks socket and process status via libc::kill()
+  - Graceful error handling for plugin load failures
 
-### Changes Made
-1. **Session Tokens**: Replaced UUID with 32-byte cryptographically secure random tokens
-2. **Rate Limiting**: Added exponential backoff (3→1min, 6→3min, 9→10min, 12→30min)
-3. **Login Audit**: New `login_attempts` table tracks all auth attempts with IP, timestamp, result
-4. **Secure Cookies**: Added `Secure` flag when `PRODUCTION` or `SECURE_COOKIES` env var is set
-5. **WebSocket Auth**: WS connections now require valid session cookie; only admins can run scripts
-6. **Password Validation**: Minimum 8 characters enforced on create/reset
-7. **Self-Service Password**: Users can change their own password via `/api/me/password`
-8. **Session Cleanup**: Expired sessions cleaned on server startup
+- **Phase 2.2 (Plugin Lifecycle)**: All 7 tasks complete
+  - Plugin state storage in `./plugins/.metadata/config.json`
+  - enable_plugin() / disable_plugin() methods
+  - get_plugin_status() method
+  - Load enabled state on startup via `initialize()` method
+  - Send init message to spawned plugins via Unix socket
+  - Send shutdown message before killing plugins
 
-### Frontend Changes
-- Global 401 handler auto-redirects to login on session expiry
-- Login page shows lockout countdown timer
-- New LoginHistory component in Settings page
-- Mobile navigation replaced with Sheet component (slide-out drawer)
+- **Phase 2.3 (Crash Recovery)**: 3/5 tasks complete
+  - Restart counter tracking (increment_restart_count, reset_restart_count)
+  - Exponential backoff (1s, 2s, 4s, 8s, 16s max)
+  - Auto-disable after N failures (max_restarts configurable, default 10)
+  - restart_plugin_with_backoff() method implemented
 
-### Security Trade-offs
-- Admin password still in env var (plaintext) - acceptable for self-hosted app where server access = full control anyway
-- No CSRF tokens - mitigated by SameSite=Strict cookies (upgraded from Lax in Round 2)
+### Remaining (Deferred to Phase 5)
+- Task 2.3.4: Write crash events to plugin_events table
+  - Reason: Needs database (AppState) integration
+- Task 2.3.5: Notification hooks (logs + DB entry)
+  - Reason: Needs database (AppState) integration
 
-## 2025-12-16: Security Hardening (Round 2)
+### Implementation Details
+- **Dependencies added**: toru-plugin-api (path), libc, tempfile (dev)
+- **Socket directory**: `/tmp/toru-plugins/` created on startup
+- **Metadata directory**: `./plugins/.metadata/` for config.json
+- **Process tracking**: Uses PID + Unix socket for health checks
+- **Communication**: Unix sockets with JSON messages (from toru-plugin-api)
+- **Graceful shutdown**: Sends lifecycle shutdown message before SIGTERM
+- **Error handling**: Continues loading other plugins if one fails
 
-### Context
-Detailed security review revealed vulnerabilities (Timing attack, Rate limit bypass) after initial hardening.
+### Technical Decisions
+- Used `libc::kill(pid, 0)` for cross-platform health checks (simpler than nix)
+- Socket path format: `/tmp/toru-plugins/{plugin_id}.sock`
+- Metadata JSON format: `{"plugins": {"plugin-id": true/false}}`
+- Backoff calculation: `2^min(restart_count, 4) * 1000ms`
 
-### Changes
-1. **Timing Attack Fix**: Implemented constant-time comparison for admin authentication.
-2. **IP Rate Limiting**: Added IP-based checks effectively mitigating username enumeration.
-3. **Session Security**: Upgraded to `SameSite=Strict` and added immediate invalidation on password change.
-4. **WebSocket**: Added periodic session re-validation.
-5. **Password Policy**: Enforced complexity (Upper, Lower, Number, Special).
+### Integration Status
+- ✅ Standalone implementation complete
+- ⏳ Database integration pending (Phase 5 - Plugin API Routes)
+- ⏳ Health monitoring task pending (Phase 5 - async loop checking plugin health)
 
-### Revised Trade-offs
-- **SameSite=Strict**: Improved CSRF protection but requires re-login when navigating from external sources (e.g. email links).
-- **Complexity**: Added `subtle` dependency and stricter policies.
+
+## 2025-12-30T15:20:16.530Z
+## Phase 6 Completion: Frontend - Plugin Manager
+
+**Completed:** 2025-12-30
+
+**Fixed Issues:**
+- Fixed missing closing brace in `handleTogglePlugin` function in `Plugins.tsx` (line 64 was missing `}` after `setTogglingId(null);`)
+- Fixed icon name references in `Layout.tsx`: Changed `Plugin2` to `Plug2` (lucide-react naming convention)
+
+**Build Status:** ✅ Successful - TypeScript/Vite build passes
+
+**Files Modified:**
+1. `frontend/src/lib/api.ts` - Added plugin API client functions (listPlugins, getPlugin, enablePlugin, disablePlugin, getPluginLogs)
+2. `frontend/src/pages/Plugins.tsx` - Plugin management page with cards, toggle switches, logs dialog (admin-only)
+3. `frontend/src/pages/PluginView.tsx` - Dynamic plugin container with mount/unmount lifecycle
+4. `frontend/src/App.tsx` - Added `/plugins` and `/plugin/:pluginId` routes
+5. `frontend/src/components/Layout.tsx` - Sidebar integration showing enabled plugins with health indicators
+
+**Technical Implementation:**
+- Admin-only access for plugin management
+- Plugin bundles loaded via dynamic script tags (`window.toru_plugin_<id>`)
+- Mount/unmount pattern for plugin lifecycle
+- Health status badges (healthy/unhealthy/disabled)
+- Logs dialog with timestamped entries
+- Responsive sidebar and mobile menu integration
+
+**Phase 6 Progress:** 26/26 tasks completed
+**Overall Progress:** 92/172 tasks (53.5%)
+
+## 2025-12-31T13:59:40.115Z
+# Licensing Extraction Decision (2025-12-31)
+
+## Context
+Plugin system proposal (`add-dynamic-plugin-system`) included both core plugin functionality AND licensing. This was too much scope for a single change.
+
+## Action Taken
+Extracted licensing into separate proposal `add-plugin-licensing` to:
+- Simplify plugin system MVP (remove blocking dependencies)
+- Enable faster completion of core plugin features
+- Make licensing optional enhancement for future use
+
+## What Moved to `add-plugin-licensing`:
+- Instance Identity (UUID v4 generation/persistence)
+- Plugin Licensing (HMAC-SHA256 validation)
+- License Generator CLI tool (internal)
+- License validation in plugin SDKs
+- Examples with license validation (Rust + Python)
+
+## What Stayed in `add-dynamic-plugin-system`:
+- All phases 1-7: Protocol, supervision, KV, routes, frontend, logging, examples
+- Phase 8: Documentation (restored - was accidentally removed)
+- 125/140 tasks (Phase 8 in progress)
+- 15/15 tests passing
+
+## Validation
+Both changes pass `openspec validate --strict`.
+
+## Documentation Note
+Phase 8 (Documentation) was initially deleted in error, then restored. Critical docs include:
+- toru-plugin-api README ✅
+- Python plugin guide (pending)
+- Plugin structure and build process (pending)
+- Frontend mount API (pending)
+- Plugin lifecycle and supervision (pending)
+- Protocol specification (pending)
+- Plugin manager internals (pending)
+- Logging format and TORIS integration (pending)
+- Architecture/message flow diagrams (pending)
+
+## Impact
+- Plugin system MVP is now smaller and focused
+- Licensing can be added later when actually needed
+- No blocking dependencies between the two features
+
+
+## 2026-01-13T17:46:38.238Z
+## 2026-01-13 - Phase 2: Integration Tests Rewritten
+
+**Context:** Phase 1 completed plugin supervisor implementation. Phase 2 required rewriting integration tests to actually test the real PluginSupervisor methods instead of mocks.
+
+**Problem:** Current tests in `tests/plugins_integration.rs` were creating shell scripts and testing concepts, not actual PluginSupervisor code paths.
+
+**Implementation:**
+1. Created `src/lib.rs` to expose modules (`db`, `services`) for integration testing
+2. Rewrote test helpers to use actual PluginSupervisor with temp directories
+3. Modified tests to copy real `hello-plugin-rust.binary` for realistic testing
+4. Updated tests to call actual methods:
+   - T1-T4: `scan_plugins_directory()`, `spawn_plugin()`, `read_plugin_metadata()`
+   - T12-T15: `enable_plugin()`, `disable_plugin()`, `is_plugin_enabled()`, restart counter methods
+   - T19: `forward_http_request()` with actual error handling
+   - T23: `plugin_event_log()` with real database operations
+
+**Key Fixes:**
+- Added 500ms delays after spawning plugins to allow socket creation (async process)
+- Fixed plugin route assertion (actual route is `/hello-rust` not `/hello-plugin-rust`)
+- T23 uses isolated temp database to avoid test interference
+- Removed unused imports and variables
+
+**Results:**
+- All 15 integration tests pass
+- Tests now verify actual PluginSupervisor behavior
+- Tests use real plugin binary for authentic integration testing
+- Health checks account for async socket creation timing
+
+**Reversible:** Yes - could revert to mocks if needed, but real integration tests are more valuable.
+
+
+## 2026-01-13T17:57:45.843Z
+## 2026-01-13 - Phase 3: Dead Code Cleanup - Warning Resolution Strategy
+
+**Context:** After implementing the plugin system, cargo build showed multiple dead code warnings for planned features that weren't yet integrated.
+
+**Decision:** Use `#[allow(dead_code)]` attributes with TODO comments for all planned features rather than removing functional code.
+
+**Reasoning:**
+1. **Code is actually needed** - Most "unused" code is used in tests or will be needed soon:
+   - `restart_counts`, `max_restarts` - Used in crash recovery tests
+   - `check_plugin_health` - Needed for health check endpoints
+   - `send_shutdown_message` - Needed for graceful shutdown
+   - `SqliteKvStore` - Needed when plugins require persistent storage
+   - Logger methods - Needed for expanded logging features
+
+2. **Preserve working implementations** - All code is production-quality and tested
+3. **Clear documentation** - TODO comments indicate where/how to integrate
+4. **Build hygiene** - Achieved zero warnings without losing functionality
+
+**Implementation:**
+- Added `#[allow(dead_code)]` to 13 methods/fields/structs
+- Fixed drop-reference bug (changed `drop(process)` to `let _ = process`)
+- All tests pass (23 tests total: 8 unit + 15 integration)
+- Zero compiler warnings achieved
+
+**Files Modified:**
+- `/src/services/logging.rs` - 5 methods/fields marked
+- `/src/services/kv_store.rs` - 3 items marked  
+- `/src/services/plugins.rs` - 7 methods/fields marked, 1 bug fixed
+
+**Reversible:** Yes - Remove `#[allow(dead_code)]` as features get integrated
+
+## 2026-01-13T19:15:16.357Z
+## 2026-01-13 - Created Comprehensive Plugin System Documentation
+
+**Context:** The plugin system has been implemented but lacked comprehensive documentation for developers building plugins and for AI agents understanding the system architecture.
+
+**Decision:** Created three-tier documentation structure:
+1. `docs/plugins/README.md` - User-facing guide for plugin developers (1,043 lines)
+2. `docs/plugins/PROTOCOL.md` - Complete protocol specification (708 lines)
+3. `docs/plugins/ARCHITECTURE.md` - Deep technical architecture (727 lines)
+
+**Content Highlights:**
+
+**README.md:**
+- Quick start examples (Rust and Python in 5 minutes)
+- Complete plugin implementation guides
+- Frontend development with mount/unmount API
+- Deployment instructions
+- Troubleshooting section
+
+**PROTOCOL.md:**
+- Wire format specification (4-byte length prefix + JSON)
+- All message types with examples (Lifecycle, HTTP, KV)
+- Request-response flow documentation
+- Error handling patterns
+- Performance characteristics
+
+**ARCHITECTURE.md:**
+- System component diagram
+- Data flow visualization
+- Plugin supervisor internals
+- Process management details
+- Security model and trust boundaries
+- Extension points for future development
+- Observability and TORIS integration
+
+**Reasoning:** 
+- Documentation is critical for ecosystem growth
+- AI agents need structured documentation to assist users
+- Human developers need clear examples and reference material
+- PROTOCOL.md enables third-party implementations in any language
+- ARCHITECTURE.md helps maintainers and contributors understand system design
+
+**Accuracy:** All examples verified against current implementation in:
+- `toru-plugin-api/src/`
+- `examples/hello-plugin-rust/`
+- `examples/hello-plugin-python/`
+- `openspec/changes/add-dynamic-plugin-system/design.md`
+
+**Total:** 2,478 lines of comprehensive documentation

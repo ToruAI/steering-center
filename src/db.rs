@@ -1,5 +1,5 @@
 use anyhow::Result;
-use rusqlite::{Connection, params};
+use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -74,7 +74,7 @@ pub struct User {
 #[derive(Debug, Clone)]
 pub struct Session {
     pub id: String,
-    pub user_id: Option<String>,  // None for admin (from env)
+    pub user_id: Option<String>, // None for admin (from env)
     pub user_role: UserRole,
     pub username: String,
     pub created_at: String,
@@ -93,7 +93,7 @@ pub struct LoginAttempt {
 
 pub fn init_db() -> Result<DbPool> {
     let conn = Connection::open("steering.db")?;
-    
+
     // Create tables
     conn.execute(
         "CREATE TABLE IF NOT EXISTS settings (
@@ -102,7 +102,7 @@ pub fn init_db() -> Result<DbPool> {
         )",
         [],
     )?;
-    
+
     conn.execute(
         "CREATE TABLE IF NOT EXISTS task_history (
             id TEXT PRIMARY KEY,
@@ -114,7 +114,7 @@ pub fn init_db() -> Result<DbPool> {
         )",
         [],
     )?;
-    
+
     conn.execute(
         "CREATE TABLE IF NOT EXISTS quick_actions (
             id TEXT PRIMARY KEY,
@@ -125,7 +125,7 @@ pub fn init_db() -> Result<DbPool> {
         )",
         [],
     )?;
-    
+
     // Users table (for client users, admin is from env)
     conn.execute(
         "CREATE TABLE IF NOT EXISTS users (
@@ -139,7 +139,7 @@ pub fn init_db() -> Result<DbPool> {
         )",
         [],
     )?;
-    
+
     // Sessions table
     conn.execute(
         "CREATE TABLE IF NOT EXISTS sessions (
@@ -152,7 +152,7 @@ pub fn init_db() -> Result<DbPool> {
         )",
         [],
     )?;
-    
+
     // Login attempts table for security audit and rate limiting
     conn.execute(
         "CREATE TABLE IF NOT EXISTS login_attempts (
@@ -165,27 +165,57 @@ pub fn init_db() -> Result<DbPool> {
         )",
         [],
     )?;
-    
+
     // Index for efficient rate limiting queries
     conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_login_attempts_username_time 
+        "CREATE INDEX IF NOT EXISTS idx_login_attempts_username_time
          ON login_attempts(username, attempted_at)",
         [],
     )?;
-    
+
+    // Plugin KV storage (per-plugin namespace for settings/state)
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS plugin_kv (
+            plugin_id TEXT NOT NULL,
+            key TEXT NOT NULL,
+            value TEXT,
+            PRIMARY KEY (plugin_id, key)
+        )",
+        [],
+    )?;
+
+    // Plugin events (for observability)
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS plugin_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            plugin_id TEXT NOT NULL,
+            event_type TEXT NOT NULL,
+            timestamp TEXT NOT NULL,
+            details TEXT
+        )",
+        [],
+    )?;
+
+    // Index for efficient plugin event queries
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_plugin_events_plugin_timestamp
+         ON plugin_events(plugin_id, timestamp)",
+        [],
+    )?;
+
     // Insert default settings
     conn.execute(
         "INSERT OR IGNORE INTO settings (key, value) VALUES ('scripts_dir', './scripts')",
         [],
     )?;
-    
+
     Ok(Arc::new(Mutex::new(conn)))
 }
 
 pub async fn get_setting(pool: &DbPool, key: &str) -> Result<Option<String>> {
     let conn = pool.lock().await;
     let mut stmt = conn.prepare("SELECT value FROM settings WHERE key = ?1")?;
-    let value: Option<String> = stmt.query_row(params![key], |row| Ok(row.get(0)?)).ok();
+    let value: Option<String> = stmt.query_row(params![key], |row| row.get(0)).ok();
     Ok(value)
 }
 
@@ -207,12 +237,37 @@ pub async fn get_all_settings(pool: &DbPool) -> Result<Vec<Setting>> {
             value: row.get(1)?,
         })
     })?;
-    
+
     let mut settings = Vec::new();
     for row in rows {
         settings.push(row?);
     }
     Ok(settings)
+}
+
+/// Get or create the instance ID (UUID v4)
+///
+/// On first run, generates a new UUID v4 and stores it in the settings table.
+/// On subsequent runs, returns the existing instance ID from the settings table.
+///
+/// # Arguments
+/// * `pool` - Database connection pool
+///
+/// # Returns
+/// The instance ID as a String
+pub async fn get_or_create_instance_id(pool: &DbPool) -> Result<String> {
+    // Try to get existing instance_id
+    if let Some(existing_id) = get_setting(pool, "instance_id").await? {
+        return Ok(existing_id);
+    }
+
+    // Generate new UUID v4
+    let new_id = uuid::Uuid::new_v4().to_string();
+
+    // Store in settings table
+    set_setting(pool, "instance_id", &new_id).await?;
+
+    Ok(new_id)
 }
 
 pub async fn insert_task_history(pool: &DbPool, task: &TaskHistory) -> Result<()> {
@@ -253,7 +308,7 @@ pub async fn get_task_history(pool: &DbPool, limit: i32) -> Result<Vec<TaskHisto
         "SELECT id, script_name, started_at, finished_at, exit_code, output 
          FROM task_history 
          ORDER BY started_at DESC 
-         LIMIT ?1"
+         LIMIT ?1",
     )?;
     let rows = stmt.query_map(params![limit], |row| {
         Ok(TaskHistory {
@@ -265,7 +320,7 @@ pub async fn get_task_history(pool: &DbPool, limit: i32) -> Result<Vec<TaskHisto
             output: row.get(5)?,
         })
     })?;
-    
+
     let mut history = Vec::new();
     for row in rows {
         history.push(row?);
@@ -278,7 +333,7 @@ pub async fn get_quick_actions(pool: &DbPool) -> Result<Vec<QuickAction>> {
     let mut stmt = conn.prepare(
         "SELECT id, name, script_path, icon, display_order 
          FROM quick_actions 
-         ORDER BY display_order ASC"
+         ORDER BY display_order ASC",
     )?;
     let rows = stmt.query_map([], |row| {
         Ok(QuickAction {
@@ -289,7 +344,7 @@ pub async fn get_quick_actions(pool: &DbPool) -> Result<Vec<QuickAction>> {
             display_order: row.get(4)?,
         })
     })?;
-    
+
     let mut actions = Vec::new();
     for row in rows {
         actions.push(row?);
@@ -343,22 +398,24 @@ pub async fn get_user_by_username(pool: &DbPool, username: &str) -> Result<Optio
     let conn = pool.lock().await;
     let mut stmt = conn.prepare(
         "SELECT id, username, password_hash, display_name, role, is_active, created_at 
-         FROM users WHERE username = ?1"
+         FROM users WHERE username = ?1",
     )?;
-    
-    let user = stmt.query_row(params![username], |row| {
-        let role_str: String = row.get(4)?;
-        Ok(User {
-            id: row.get(0)?,
-            username: row.get(1)?,
-            password_hash: row.get(2)?,
-            display_name: row.get(3)?,
-            role: role_str.parse().unwrap_or(UserRole::Client),
-            is_active: row.get::<_, i32>(5)? != 0,
-            created_at: row.get(6)?,
+
+    let user = stmt
+        .query_row(params![username], |row| {
+            let role_str: String = row.get(4)?;
+            Ok(User {
+                id: row.get(0)?,
+                username: row.get(1)?,
+                password_hash: row.get(2)?,
+                display_name: row.get(3)?,
+                role: role_str.parse().unwrap_or(UserRole::Client),
+                is_active: row.get::<_, i32>(5)? != 0,
+                created_at: row.get(6)?,
+            })
         })
-    }).ok();
-    
+        .ok();
+
     Ok(user)
 }
 
@@ -366,22 +423,24 @@ pub async fn get_user_by_id(pool: &DbPool, id: &str) -> Result<Option<User>> {
     let conn = pool.lock().await;
     let mut stmt = conn.prepare(
         "SELECT id, username, password_hash, display_name, role, is_active, created_at 
-         FROM users WHERE id = ?1"
+         FROM users WHERE id = ?1",
     )?;
-    
-    let user = stmt.query_row(params![id], |row| {
-        let role_str: String = row.get(4)?;
-        Ok(User {
-            id: row.get(0)?,
-            username: row.get(1)?,
-            password_hash: row.get(2)?,
-            display_name: row.get(3)?,
-            role: role_str.parse().unwrap_or(UserRole::Client),
-            is_active: row.get::<_, i32>(5)? != 0,
-            created_at: row.get(6)?,
+
+    let user = stmt
+        .query_row(params![id], |row| {
+            let role_str: String = row.get(4)?;
+            Ok(User {
+                id: row.get(0)?,
+                username: row.get(1)?,
+                password_hash: row.get(2)?,
+                display_name: row.get(3)?,
+                role: role_str.parse().unwrap_or(UserRole::Client),
+                is_active: row.get::<_, i32>(5)? != 0,
+                created_at: row.get(6)?,
+            })
         })
-    }).ok();
-    
+        .ok();
+
     Ok(user)
 }
 
@@ -389,9 +448,9 @@ pub async fn get_all_users(pool: &DbPool) -> Result<Vec<User>> {
     let conn = pool.lock().await;
     let mut stmt = conn.prepare(
         "SELECT id, username, password_hash, display_name, role, is_active, created_at 
-         FROM users ORDER BY created_at DESC"
+         FROM users ORDER BY created_at DESC",
     )?;
-    
+
     let rows = stmt.query_map([], |row| {
         let role_str: String = row.get(4)?;
         Ok(User {
@@ -404,7 +463,7 @@ pub async fn get_all_users(pool: &DbPool) -> Result<Vec<User>> {
             created_at: row.get(6)?,
         })
     })?;
-    
+
     let mut users = Vec::new();
     for row in rows {
         users.push(row?);
@@ -412,7 +471,12 @@ pub async fn get_all_users(pool: &DbPool) -> Result<Vec<User>> {
     Ok(users)
 }
 
-pub async fn update_user(pool: &DbPool, id: &str, display_name: Option<&str>, is_active: bool) -> Result<()> {
+pub async fn update_user(
+    pool: &DbPool,
+    id: &str,
+    display_name: Option<&str>,
+    is_active: bool,
+) -> Result<()> {
     let conn = pool.lock().await;
     conn.execute(
         "UPDATE users SET display_name = ?1, is_active = ?2 WHERE id = ?3",
@@ -428,10 +492,7 @@ pub async fn update_user_password(pool: &DbPool, id: &str, password_hash: &str) 
         params![password_hash, id],
     )?;
     // Invalidate existing sessions for security
-    conn.execute(
-        "DELETE FROM sessions WHERE user_id = ?1",
-        params![id],
-    )?;
+    conn.execute("DELETE FROM sessions WHERE user_id = ?1", params![id])?;
     Ok(())
 }
 
@@ -466,21 +527,23 @@ pub async fn get_session(pool: &DbPool, id: &str) -> Result<Option<Session>> {
     let conn = pool.lock().await;
     let mut stmt = conn.prepare(
         "SELECT id, user_id, user_role, username, created_at, expires_at 
-         FROM sessions WHERE id = ?1"
+         FROM sessions WHERE id = ?1",
     )?;
-    
-    let session = stmt.query_row(params![id], |row| {
-        let role_str: String = row.get(2)?;
-        Ok(Session {
-            id: row.get(0)?,
-            user_id: row.get(1)?,
-            user_role: role_str.parse().unwrap_or(UserRole::Client),
-            username: row.get(3)?,
-            created_at: row.get(4)?,
-            expires_at: row.get(5)?,
+
+    let session = stmt
+        .query_row(params![id], |row| {
+            let role_str: String = row.get(2)?;
+            Ok(Session {
+                id: row.get(0)?,
+                user_id: row.get(1)?,
+                user_role: role_str.parse().unwrap_or(UserRole::Client),
+                username: row.get(3)?,
+                created_at: row.get(4)?,
+                expires_at: row.get(5)?,
+            })
         })
-    }).ok();
-    
+        .ok();
+
     Ok(session)
 }
 
@@ -495,6 +558,26 @@ pub async fn cleanup_expired_sessions(pool: &DbPool) -> Result<()> {
     let now = chrono::Utc::now().to_rfc3339();
     conn.execute("DELETE FROM sessions WHERE expires_at < ?1", params![now])?;
     Ok(())
+}
+
+// ============ Plugin Types ============
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)] // Used by plugins, not yet integrated (Phase 5+)
+pub struct PluginKvEntry {
+    pub plugin_id: String,
+    pub key: String,
+    pub value: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)] // Used by plugins, not yet integrated (Phase 5+)
+pub struct PluginEvent {
+    pub id: i64,
+    pub plugin_id: String,
+    pub event_type: String, // started, stopped, crashed, restarted, disabled
+    pub timestamp: String,
+    pub details: Option<String>, // JSON
 }
 
 // ============ Login Attempts functions ============
@@ -521,7 +604,7 @@ pub async fn get_recent_failed_attempts(pool: &DbPool, username: &str, since: &s
     let conn = pool.lock().await;
     let mut stmt = conn.prepare(
         "SELECT COUNT(*) FROM login_attempts 
-         WHERE username = ?1 AND success = 0 AND attempted_at > ?2"
+         WHERE username = ?1 AND success = 0 AND attempted_at > ?2",
     )?;
     let count: i32 = stmt.query_row(params![username, since], |row| row.get(0))?;
     Ok(count)
@@ -532,7 +615,7 @@ pub async fn get_recent_failed_attempts_by_ip(pool: &DbPool, ip: &str, since: &s
     let conn = pool.lock().await;
     let mut stmt = conn.prepare(
         "SELECT COUNT(*) FROM login_attempts 
-         WHERE ip_address = ?1 AND success = 0 AND attempted_at > ?2"
+         WHERE ip_address = ?1 AND success = 0 AND attempted_at > ?2",
     )?;
     let count: i32 = stmt.query_row(params![ip, since], |row| row.get(0))?;
     Ok(count)
@@ -544,7 +627,7 @@ pub async fn get_last_failed_attempt(pool: &DbPool, username: &str) -> Result<Op
     let mut stmt = conn.prepare(
         "SELECT attempted_at FROM login_attempts 
          WHERE username = ?1 AND success = 0 
-         ORDER BY attempted_at DESC LIMIT 1"
+         ORDER BY attempted_at DESC LIMIT 1",
     )?;
     let result = stmt.query_row(params![username], |row| row.get(0)).ok();
     Ok(result)
@@ -556,7 +639,7 @@ pub async fn get_last_failed_attempt_by_ip(pool: &DbPool, ip: &str) -> Result<Op
     let mut stmt = conn.prepare(
         "SELECT attempted_at FROM login_attempts 
          WHERE ip_address = ?1 AND success = 0 
-         ORDER BY attempted_at DESC LIMIT 1"
+         ORDER BY attempted_at DESC LIMIT 1",
     )?;
     let result = stmt.query_row(params![ip], |row| row.get(0)).ok();
     Ok(result)
@@ -569,7 +652,7 @@ pub async fn get_login_attempts(pool: &DbPool, limit: i32) -> Result<Vec<LoginAt
         "SELECT id, username, ip_address, success, failure_reason, attempted_at 
          FROM login_attempts 
          ORDER BY attempted_at DESC 
-         LIMIT ?1"
+         LIMIT ?1",
     )?;
     let rows = stmt.query_map(params![limit], |row| {
         Ok(LoginAttempt {
@@ -581,7 +664,7 @@ pub async fn get_login_attempts(pool: &DbPool, limit: i32) -> Result<Vec<LoginAt
             attempted_at: row.get(5)?,
         })
     })?;
-    
+
     let mut attempts = Vec::new();
     for row in rows {
         attempts.push(row?);
@@ -593,6 +676,155 @@ pub async fn get_login_attempts(pool: &DbPool, limit: i32) -> Result<Vec<LoginAt
 pub async fn cleanup_old_login_attempts(pool: &DbPool) -> Result<()> {
     let conn = pool.lock().await;
     let cutoff = (chrono::Utc::now() - chrono::Duration::days(30)).to_rfc3339();
-    conn.execute("DELETE FROM login_attempts WHERE attempted_at < ?1", params![cutoff])?;
+    conn.execute(
+        "DELETE FROM login_attempts WHERE attempted_at < ?1",
+        params![cutoff],
+    )?;
+    Ok(())
+}
+
+// ============ Plugin KV functions ============
+
+/// Get a value from plugin KV storage
+pub async fn plugin_kv_get(pool: &DbPool, plugin_id: &str, key: &str) -> Result<Option<String>> {
+    let conn = pool.lock().await;
+    let mut stmt = conn.prepare("SELECT value FROM plugin_kv WHERE plugin_id = ?1 AND key = ?2")?;
+    let value: Option<String> = stmt
+        .query_row(params![plugin_id, key], |row| row.get(0))
+        .ok();
+    Ok(value)
+}
+
+/// Set a value in plugin KV storage
+pub async fn plugin_kv_set(pool: &DbPool, plugin_id: &str, key: &str, value: &str) -> Result<()> {
+    let conn = pool.lock().await;
+    conn.execute(
+        "INSERT OR REPLACE INTO plugin_kv (plugin_id, key, value) VALUES (?1, ?2, ?3)",
+        params![plugin_id, key, value],
+    )?;
+    Ok(())
+}
+
+/// Delete a value from plugin KV storage
+pub async fn plugin_kv_delete(pool: &DbPool, plugin_id: &str, key: &str) -> Result<()> {
+    let conn = pool.lock().await;
+    conn.execute(
+        "DELETE FROM plugin_kv WHERE plugin_id = ?1 AND key = ?2",
+        params![plugin_id, key],
+    )?;
+    Ok(())
+}
+
+/// Get all KV entries for a plugin
+#[allow(dead_code)] // Used by plugins, not yet integrated (Phase 5+)
+pub async fn plugin_kv_get_all(pool: &DbPool, plugin_id: &str) -> Result<Vec<PluginKvEntry>> {
+    let conn = pool.lock().await;
+    let mut stmt = conn
+        .prepare("SELECT plugin_id, key, value FROM plugin_kv WHERE plugin_id = ?1 ORDER BY key")?;
+    let rows = stmt.query_map(params![plugin_id], |row| {
+        Ok(PluginKvEntry {
+            plugin_id: row.get(0)?,
+            key: row.get(1)?,
+            value: row.get(2)?,
+        })
+    })?;
+
+    let mut entries = Vec::new();
+    for row in rows {
+        entries.push(row?);
+    }
+    Ok(entries)
+}
+
+// ============ Plugin Event functions ============
+
+/// Log a plugin event
+pub async fn plugin_event_log(
+    pool: &DbPool,
+    plugin_id: &str,
+    event_type: &str,
+    details: Option<&str>,
+) -> Result<i64> {
+    let conn = pool.lock().await;
+    conn.execute(
+        "INSERT INTO plugin_events (plugin_id, event_type, timestamp, details) VALUES (?1, ?2, ?3, ?4)",
+        params![
+            plugin_id,
+            event_type,
+            chrono::Utc::now().to_rfc3339(),
+            details,
+        ],
+    )?;
+    Ok(conn.last_insert_rowid())
+}
+
+/// Get recent events for a plugin
+#[allow(dead_code)] // Used by plugins, not yet integrated (Phase 5+)
+pub async fn plugin_event_get_recent(
+    pool: &DbPool,
+    plugin_id: &str,
+    limit: i32,
+) -> Result<Vec<PluginEvent>> {
+    let conn = pool.lock().await;
+    let mut stmt = conn.prepare(
+        "SELECT id, plugin_id, event_type, timestamp, details
+         FROM plugin_events
+         WHERE plugin_id = ?1
+         ORDER BY timestamp DESC
+         LIMIT ?2",
+    )?;
+    let rows = stmt.query_map(params![plugin_id, limit], |row| {
+        Ok(PluginEvent {
+            id: row.get(0)?,
+            plugin_id: row.get(1)?,
+            event_type: row.get(2)?,
+            timestamp: row.get(3)?,
+            details: row.get(4)?,
+        })
+    })?;
+
+    let mut events = Vec::new();
+    for row in rows {
+        events.push(row?);
+    }
+    Ok(events)
+}
+
+/// Get all recent plugin events (for dashboard)
+#[allow(dead_code)] // Used by plugins, not yet integrated (Phase 5+)
+pub async fn plugin_event_get_all_recent(pool: &DbPool, limit: i32) -> Result<Vec<PluginEvent>> {
+    let conn = pool.lock().await;
+    let mut stmt = conn.prepare(
+        "SELECT id, plugin_id, event_type, timestamp, details
+         FROM plugin_events
+         ORDER BY timestamp DESC
+         LIMIT ?1",
+    )?;
+    let rows = stmt.query_map(params![limit], |row| {
+        Ok(PluginEvent {
+            id: row.get(0)?,
+            plugin_id: row.get(1)?,
+            event_type: row.get(2)?,
+            timestamp: row.get(3)?,
+            details: row.get(4)?,
+        })
+    })?;
+
+    let mut events = Vec::new();
+    for row in rows {
+        events.push(row?);
+    }
+    Ok(events)
+}
+
+/// Clean up old plugin events (keep last 7 days)
+#[allow(dead_code)] // Used by plugins, not yet integrated (Phase 5+)
+pub async fn cleanup_old_plugin_events(pool: &DbPool) -> Result<()> {
+    let conn = pool.lock().await;
+    let cutoff = (chrono::Utc::now() - chrono::Duration::days(7)).to_rfc3339();
+    conn.execute(
+        "DELETE FROM plugin_events WHERE timestamp < ?1",
+        params![cutoff],
+    )?;
     Ok(())
 }

@@ -111,6 +111,53 @@ export interface Setting {
   value: string;
 }
 
+export interface PluginMetadata {
+  id: string;
+  name: string;
+  version: string;
+  author: string;
+  icon: string | null;
+  route: string | null;
+}
+
+export interface PluginStatus {
+  metadata: PluginMetadata;
+  enabled: boolean;
+  running: boolean;
+  health: 'healthy' | 'unhealthy' | 'disabled';
+  pid: number | null;
+  socket_path: string | null;
+}
+
+export interface Plugin {
+  id: string;
+  name: string;
+  version: string;
+  author: string;
+  icon: string | null;
+  route: string | null;
+  enabled: boolean;
+  running: boolean;
+  health: 'healthy' | 'unhealthy' | 'disabled';
+  pid: number | null;
+  socket_path: string | null;
+}
+
+export interface PluginLogEntry {
+  timestamp: string;
+  level: string;
+  plugin: string | null;
+  message: string;
+  error?: string;
+  pid?: number;
+}
+
+export interface PluginLogsResponse {
+  logs: PluginLogEntry[];
+  page: number;
+  page_size: number;
+}
+
 async function handleResponse<T>(res: Response, endpoint: string): Promise<T> {
   if (!res.ok) {
     const errorText = await res.text().catch(() => 'Unknown error');
@@ -296,5 +343,37 @@ export const api = {
   deleteQuickAction: async (id: string): Promise<void> => {
     const res = await request(`/quick-actions/${id}`, { method: 'DELETE' });
     await handleAuthResponse(res, `/quick-actions/${id}`);
+  },
+
+  // Plugin management (Admin only)
+  listPlugins: async (): Promise<Plugin[]> => {
+    const res = await request('/plugins');
+    return handleAuthResponse(res, '/plugins');
+  },
+
+  getPlugin: async (id: string): Promise<Plugin> => {
+    const res = await request(`/plugins/${id}`);
+    return handleAuthResponse(res, `/plugins/${id}`);
+  },
+
+  enablePlugin: async (id: string): Promise<void> => {
+    const res = await request(`/plugins/${id}/enable`, { method: 'POST' });
+    await handleAuthResponse(res, `/plugins/${id}/enable`);
+  },
+
+  disablePlugin: async (id: string): Promise<void> => {
+    const res = await request(`/plugins/${id}/disable`, { method: 'POST' });
+    await handleAuthResponse(res, `/plugins/${id}/disable`);
+  },
+
+  getPluginLogs: async (id: string, options?: { page?: number; page_size?: number; level?: string }): Promise<PluginLogsResponse> => {
+    const params = new URLSearchParams();
+    if (options?.page !== undefined) params.set('page', options.page.toString());
+    if (options?.page_size !== undefined) params.set('page_size', options.page_size.toString());
+    if (options?.level) params.set('level', options.level);
+
+    const url = `/plugins/${id}/logs${params.toString() ? '?' + params.toString() : ''}`;
+    const res = await request(url);
+    return handleAuthResponse(res, url);
   },
 };

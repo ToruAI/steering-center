@@ -20,16 +20,22 @@ Most server dashboards are built for sysadmins. Steering Center is built for **c
 
 **No vendor lock-in.** It runs on your VPS, you own everything.
 
-## What Can You Build?
+## Features
 
-This is a foundation. Out of the box you get system monitoring and script execution. Fork it and add:
+**Out of the box:**
+- System monitoring (CPU, RAM, storage, uptime)
+- Script execution with real-time terminal output
+- Quick actions for one-click operations
+- User management (admin + client roles)
+- **Plugin system** - extend with custom functionality
 
-- **Docker dashboards** - container status, logs, controls
-- **Database metrics** - PostgreSQL, Redis, MongoDB stats
-- **AI agent monitoring** - track your autonomous agents
-- **Business KPIs** - conversions, revenue, user activity
-- **Custom pages** - build dashboards for any data source
-- **Alerts & notifications** - Slack, email, webhooks
+**Build your own plugins for:**
+- Docker dashboards - container status, logs, controls
+- Database metrics - PostgreSQL, Redis, MongoDB stats
+- AI agent monitoring - track your autonomous agents
+- Business KPIs - conversions, revenue, user activity
+- Custom pages - build dashboards for any data source
+- Alerts & notifications - Slack, email, webhooks
 
 ## Prerequisites
 
@@ -77,6 +83,7 @@ Open `http://localhost:3000`
 | Frontend | React + TypeScript + Vite |
 | Styling | Tailwind CSS + shadcn/ui |
 | Real-time | WebSocket streaming |
+| Plugins | Process isolation + Unix sockets |
 
 **Resource usage:** Under 100MB RAM. Single binary. No Docker required.
 
@@ -134,9 +141,13 @@ CLI options take priority over environment variables.
 ## Project Structure
 
 ```
-/frontend    # React dashboard (Vite + TypeScript + shadcn/ui)
-/src         # Rust backend (Axum API + WebSocket)
-/scripts     # Shell scripts for execution
+/frontend        # React dashboard (Vite + TypeScript + shadcn/ui)
+/src             # Rust backend (Axum API + WebSocket)
+/scripts         # Shell scripts for execution
+/plugins         # Installed plugins (.binary files)
+/toru-plugin-api # Rust SDK for plugin development
+/examples        # Example plugins (Rust + Python)
+/docs/plugins    # Plugin development documentation
 ```
 
 ## API
@@ -148,6 +159,35 @@ CLI options take priority over environment variables.
 | `POST /api/quick-actions` | Create one-click actions |
 | `GET /api/history` | Execution history |
 | `WS /api/ws` | Real-time terminal output |
+| `GET /api/plugins` | List installed plugins |
+| `POST /api/plugins/:id/enable` | Enable a plugin |
+| `GET /api/plugins/route/*` | Plugin custom routes |
+
+## Plugin System
+
+Extend Steering Center with custom plugins. Plugins run as isolated processes communicating via Unix sockets.
+
+**Quick start (Rust):**
+```bash
+cd examples/hello-plugin-rust
+./build.sh
+# Copy hello-plugin-rust.binary to plugins/
+```
+
+**Quick start (Python):**
+```bash
+cd examples/hello-plugin-python
+./build.sh
+# Copy hello-plugin-python.binary to plugins/
+```
+
+Plugins can:
+- Add custom pages to the sidebar
+- Expose HTTP endpoints
+- Store persistent data (KV storage)
+- Run background tasks
+
+See [docs/plugins/README.md](docs/plugins/README.md) for the full development guide.
 
 ## Philosophy
 

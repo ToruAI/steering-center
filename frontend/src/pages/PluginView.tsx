@@ -8,9 +8,13 @@ interface PluginMountFunction {
 }
 
 interface PluginAPI {
-  fetch: typeof fetch;
+  fetch: (path: string, options?: RequestInit) => Promise<Response>;
   navigate: (path: string) => void;
   showToast: (message: string, type?: 'success' | 'error' | 'info') => void;
+  kv: {
+    get: (key: string) => Promise<string | null>;
+    set: (key: string, value: string) => Promise<void>;
+  };
 }
 
 export function PluginView() {
@@ -23,7 +27,13 @@ export function PluginView() {
 
   // Plugin API provided to the plugin
   const pluginAPI: PluginAPI = {
-    fetch: window.fetch.bind(window),
+    // Wrap fetch to prepend plugin route prefix
+    fetch: (path: string, options?: RequestInit) => {
+      // Get plugin metadata to find its route
+      const routePrefix = `/api/plugins/route/${pluginId}`;
+      const fullPath = path.startsWith('/') ? `${routePrefix}${path}` : `${routePrefix}/${path}`;
+      return window.fetch(fullPath, options);
+    },
     navigate,
     showToast: (message, type = 'info') => {
       // Simple toast implementation using window events
@@ -32,6 +42,26 @@ export function PluginView() {
           detail: { message, type },
         })
       );
+    },
+    kv: {
+      get: async (key: string) => {
+        const response = await window.fetch(`/api/plugins/${pluginId}/kv`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'get', key }),
+        });
+        if (!response.ok) throw new Error('Failed to get KV');
+        const data = await response.json();
+        return data.value ?? null;
+      },
+      set: async (key: string, value: string) => {
+        const response = await window.fetch(`/api/plugins/${pluginId}/kv`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'set', key, value }),
+        });
+        if (!response.ok) throw new Error('Failed to set KV');
+      },
     },
   };
 

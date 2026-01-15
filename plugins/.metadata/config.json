@@ -1,6 +1,8 @@
 {
   "plugins": {
     "hello-plugin-python": true,
-    "hello-plugin-rust": true
+    "hello-plugin-rust": true,
+    "systemd-services": true,
+    "systemd-timers": true
   }
 }

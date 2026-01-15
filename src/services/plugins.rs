@@ -4,7 +4,6 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
-use tokio::io::AsyncWriteExt;
 use tokio::net::UnixStream;
 use tokio::process::Child;
 use tracing::{debug, error, info, warn};
@@ -699,7 +698,7 @@ impl PluginSupervisor {
     /// # Arguments
     /// * `plugin_id` - Plugin identifier
     async fn send_init_message(&self, plugin_id: &str) -> Result<()> {
-        use toru_plugin_api::LifecycleInitPayload;
+        use toru_plugin_api::{LifecycleInitPayload, PluginProtocol};
 
         let process = self
             .get_plugin_status(plugin_id)
@@ -732,11 +731,10 @@ impl PluginSupervisor {
 
         let message = Message::new_lifecycle("init", Some(init_payload));
 
-        // Serialize and send message
-        let json = serde_json::to_string(&message).context("Failed to serialize init message")?;
-
-        stream
-            .write_all(json.as_bytes())
+        // Send message using length-prefixed protocol
+        let protocol = PluginProtocol::new();
+        protocol
+            .write_message(&mut stream, &message)
             .await
             .context("Failed to send init message")?;
 
@@ -751,6 +749,8 @@ impl PluginSupervisor {
     // TODO: Integrate in graceful shutdown flow
     #[allow(dead_code)]
     async fn send_shutdown_message(&self, plugin_id: &str) -> Result<()> {
+        use toru_plugin_api::PluginProtocol;
+
         let process = self
             .get_plugin_status(plugin_id)
             .context("Plugin not found")?;
@@ -773,12 +773,10 @@ impl PluginSupervisor {
         // Create shutdown message
         let message = Message::new_lifecycle("shutdown", None);
 
-        // Serialize and send message
-        let json =
-            serde_json::to_string(&message).context("Failed to serialize shutdown message")?;
-
-        stream
-            .write_all(json.as_bytes())
+        // Send message using length-prefixed protocol
+        let protocol = PluginProtocol::new();
+        protocol
+            .write_message(&mut stream, &message)
             .await
             .context("Failed to send shutdown message")?;
 

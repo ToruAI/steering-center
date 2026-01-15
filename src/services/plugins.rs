@@ -843,47 +843,55 @@ impl PluginSupervisor {
         .map_err(|_| anyhow::anyhow!("Plugin response timeout after 30s"))?
         .context("Failed to read HTTP response from plugin")?;
 
-        // Extract the HTTP response - parse JSON to get status/headers/body
+        // Extract the HTTP response - the plugin sends HttpRequest with body containing JSON response
+        // Message structure:
+        // {
+        //   "payload": {
+        //     "type": "http",
+        //     "request_id": "...",
+        //     "payload": {         // HttpRequest
+        //       "method": "RESPONSE",
+        //       "body": "{\"status\":200,\"headers\":{...},\"body\":\"...\"}"  // JSON string
+        //     }
+        //   }
+        // }
         let response_value =
             serde_json::to_value(&response_msg).context("Failed to serialize response message")?;
 
-        // Extract HTTP response fields from nested payload
+        // Get the inner payload (HttpRequest) and extract the body JSON string
+        let body_json_str = response_value
+            .get("payload")
+            .and_then(|p| p.get("payload"))  // Get HttpRequest from MessagePayload::Http
+            .and_then(|req| req.get("body"))
+            .and_then(|b| b.as_str())
+            .unwrap_or("{}");
+
+        // Parse the body JSON string to get the actual response fields
+        let parsed_response: serde_json::Value =
+            serde_json::from_str(body_json_str).unwrap_or_else(|_| serde_json::json!({}));
+
         let http_response = toru_plugin_api::HttpMessageResponse {
-            status: response_value
-                .get("payload")
-                .and_then(|p| {
-                    // Check if payload has "http" field (nested response)
-                    if p.get("http").is_some() {
-                        p.get("http").and_then(|h| h.get("status"))
-                    } else {
-                        // Direct payload without nesting
-                        p.get("status")
-                    }
-                })
+            status: parsed_response
+                .get("status")
                 .and_then(|s| s.as_u64())
                 .unwrap_or(500) as u16,
-            headers: response_value
-                .get("payload")
-                .and_then(|p| {
-                    if p.get("http").is_some() {
-                        p.get("http").and_then(|h| h.get("headers"))
-                    } else {
-                        p.get("headers")
-                    }
-                })
+            headers: parsed_response
+                .get("headers")
                 .and_then(|h| serde_json::from_value(h.clone()).ok())
                 .unwrap_or_default(),
-            body: response_value
-                .get("payload")
-                .and_then(|p| {
-                    if p.get("http").is_some() {
-                        p.get("http").and_then(|h| h.get("body"))
+            body: parsed_response
+                .get("body")
+                .and_then(|b| {
+                    // body can be either a string or null
+                    if b.is_string() {
+                        Some(b.as_str().unwrap().to_string())
+                    } else if b.is_null() {
+                        None
                     } else {
-                        p.get("body")
+                        // If body is an object/array, serialize it
+                        Some(serde_json::to_string(b).unwrap_or_default())
                     }
-                })
-                .and_then(|b| b.as_str())
-                .map(|s| s.to_string()),
+                }),
         };
 
         Ok(http_response)

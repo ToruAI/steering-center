@@ -351,7 +351,13 @@ async fn get_plugin_bundle(
     let content =
         fs::read_to_string(&bundle_path).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    Ok(([(header::CONTENT_TYPE, "application/javascript")], content))
+    Ok((
+        [
+            (header::CONTENT_TYPE, "application/javascript"),
+            (header::CACHE_CONTROL, "no-store, no-cache, must-revalidate"),
+        ],
+        content,
+    ))
 }
 
 #[derive(Deserialize)]
